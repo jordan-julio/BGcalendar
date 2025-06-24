@@ -81,7 +81,7 @@ export default function Home() {
     <div className="min-h-screen">
       {/* Modern Header */}
       <header className="sticky top-0 z-40 glass-effect border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl bg-white mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
               <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg">
