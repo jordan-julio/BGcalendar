@@ -1,9 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Enable PWA features
-  experimental: {
-    appDir: true,
-  },
+  // Force cache busting for development
+  generateEtags: false,
+  
   // Headers for service worker and security
   async headers() {
     return [
@@ -17,6 +16,15 @@ const nextConfig = {
           {
             key: 'Service-Worker-Allowed',
             value: '/',
+          },
+        ],
+      },
+      {
+        source: '/_next/static/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
           },
         ],
       },
@@ -35,6 +43,11 @@ const nextConfig = {
             key: 'Referrer-Policy',
             value: 'origin-when-cross-origin',
           },
+          // Force no cache in development
+          ...(process.env.NODE_ENV === 'development' ? [{
+            key: 'Cache-Control',
+            value: 'no-cache, no-store, must-revalidate',
+          }] : []),
         ],
       },
     ];

@@ -1,121 +1,167 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Bell } from 'lucide-react'
+import { Bell, BellRing } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
-export interface Notification {
+export interface NotificationRecord {
+  id: string
+  event_id: string
+  user_id: string
+  notify_date: string
+  sent: boolean
+  notification_type: 'day_before' | 'event_day'
+  event: {
     id: string
-    event_id: string
-    user_id: string
-    notify_date: string
-    sent: boolean
-    event?: Event
+    title: string
+    start_date: string
+    time?: string
+    description?: string
+  }
 }
 
 export default function NotificationBell({ userId }: { userId: string }) {
-  const [notifications, setNotifications] = useState<Notification[]>([])
-  const [showDropdown, setShowDropdown] = useState(false)
+  const [upcoming, setUpcoming] = useState<NotificationRecord[]>([])
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [hasPermission, setHasPermission] = useState(Notification.permission === 'granted')
 
   useEffect(() => {
     if (!userId) return
 
-    fetchNotifications()
-    checkAndSendNotifications()
+    // on mount: request permission & fetch
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().then(p => setHasPermission(p === 'granted'))
+    }
 
-    // Check for notifications every hour
-    const interval = setInterval(checkAndSendNotifications, 3600000)
+    fetchUpcoming()
+    const interval1 = setInterval(() => checkAndSend(), 60_000)
+    const interval2 = setInterval(() => fetchUpcoming(), 3_600_000)
 
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval1)
+      clearInterval(interval2)
+    }
   }, [userId])
 
-  const fetchNotifications = async () => {
-    const today = new Date().toISOString().split('T')[0]
-    const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  // fetch next 7 days
+  async function fetchUpcoming() {
+    const today = new Date().toISOString().slice(0,10)
+    const week  = new Date(Date.now() + 7*86400000).toISOString().slice(0,10)
 
     const { data, error } = await supabase
       .from('notifications')
-      .select(`
-        *,
-        event:events(*)
-      `)
+      .select('*, event:events(*)')
       .eq('user_id', userId)
       .gte('notify_date', today)
-      .lte('notify_date', nextWeek)
+      .lte('notify_date', week)
       .eq('sent', false)
+      .order('notify_date', { ascending: true })
 
-    if (!error && data) {
-      setNotifications(data)
-    }
+    if (!error) setUpcoming(data || [])
   }
 
-  const checkAndSendNotifications = async () => {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return
+  // check DB and fire SW notifications
+  async function checkAndSend() {
+    if (!hasPermission) return
 
-    const today = new Date().toISOString().split('T')[0]
-    
-    const { data: dueNotifications } = await supabase
+    const today = new Date().toISOString().slice(0,10)
+    const { data, error } = await supabase
       .from('notifications')
-      .select(`
-        *,
-        event:events(*)
-      `)
+      .select('*, event:events(*)')
       .eq('user_id', userId)
       .eq('notify_date', today)
       .eq('sent', false)
 
-    if (dueNotifications && dueNotifications.length > 0) {
-      for (const notification of dueNotifications) {
-        if (notification.event) {
-          new Notification(`Upcoming Event: ${notification.event.title}`, {
-            body: `This event is scheduled for ${new Date(notification.event.start_date).toLocaleDateString()}`,
-            icon: '/icon-192x192.png',
-          })
+    if (error || !data?.length) return
 
-          // Mark as sent
-          await supabase
-            .from('notifications')
-            .update({ sent: true })
-            .eq('id', notification.id)
-        }
-      }
-      fetchNotifications()
+    const reg = await navigator.serviceWorker.ready
+    for (const note of data) {
+      const { event, notification_type } = note
+      const title = notification_type === 'day_before'
+        ? `Reminder: ${event.title}`
+        : `Today: ${event.title}`
+      const body = notification_type === 'day_before'
+        ? `Happening tomorrow (${new Date(event.start_date).toLocaleDateString()})`
+        : `Happening today${event.time ? ` at ${event.time}` : ''}`
+
+      reg.showNotification(title, {
+        body,
+        icon: '/icon-192x192.png',
+        badge: '/icon-192x192.png',
+        tag: `event-${event.id}`,
+        data: { url: '/' }
+      })
+
+      // mark sent
+      await supabase
+        .from('notifications')
+        .update({ sent: true })
+        .eq('id', note.id)
     }
+  }
+
+  const formatDate = (dStr: string) => {
+    const d = new Date(dStr)
+    const t = new Date()
+    const tm = new Date(); tm.setDate(t.getDate()+1)
+    if (d.toDateString() === t.toDateString()) return 'Today'
+    if (d.toDateString() === tm.toDateString()) return 'Tomorrow'
+    return d.toLocaleDateString()
   }
 
   return (
     <div className="relative">
       <button
-        onClick={() => setShowDropdown(!showDropdown)}
-        className="relative p-2 text-gray-600 hover:text-gray-900 transition-colors"
+        onClick={() => {
+          if (Notification.permission === 'default') {
+            Notification.requestPermission().then(p => setHasPermission(p === 'granted'))
+          }
+          setDropdownOpen(o => !o)
+        }}
+        className="relative p-2 hover:bg-gray-100 rounded-lg"
+        title={hasPermission ? 'View reminders' : 'Enable browser notifications'}
       >
-        <Bell className="h-5 w-5" />
-        {notifications.length > 0 && (
-          <span className="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full"></span>
+        {upcoming.length > 0 ? <BellRing className="h-5 w-5" /> : <Bell className="h-5 w-5" />}
+        {upcoming.length > 0 && (
+          <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full h-4 w-4 text-xs flex items-center justify-center">
+            {upcoming.length > 9 ? '9+' : upcoming.length}
+          </span>
+        )}
+        {!hasPermission && (
+          <span className="absolute -top-1 -right-1 bg-yellow-500 rounded-full h-3 w-3" />
         )}
       </button>
 
-      {showDropdown && (
-        <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
-          <div className="p-4 border-b border-gray-200">
-            <h3 className="text-sm font-semibold text-gray-900">Upcoming Events</h3>
-          </div>
-          <div className="max-h-96 overflow-y-auto">
-            {notifications.length === 0 ? (
-              <p className="p-4 text-sm text-gray-500 text-center">No upcoming events</p>
-            ) : (
-              notifications.map((notification) => (
-                <div key={notification.id} className="p-4 hover:bg-gray-50 border-b border-gray-100">
-                  <p className="text-sm font-medium text-gray-900">
-                    {notification.event?.title}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {notification.event && new Date(notification.event.start_date).toLocaleDateString()}
-                  </p>
-                </div>
-              ))
+      {dropdownOpen && (
+        <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg z-50 max-h-96 overflow-auto">
+          <div className="p-4 border-b flex justify-between items-center">
+            <h3 className="font-semibold">Upcoming Reminders</h3>
+            {!hasPermission && (
+              <button
+                onClick={() => Notification.requestPermission().then(p => setHasPermission(p==='granted'))}
+                className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded"
+              >
+                Enable
+              </button>
             )}
           </div>
+
+          {(!hasPermission || upcoming.length === 0) ? (
+            <div className="p-4 text-center text-gray-500">
+              {!hasPermission ? 'Notifications disabled' : 'No upcoming reminders'}
+            </div>
+          ) : (
+            upcoming.map(n => (
+              <div key={n.id} className="p-3 border-b hover:bg-gray-50 last:border-none">
+                <p className="font-medium truncate">{n.event.title}</p>
+                <p className="text-xs text-gray-600">
+                  {n.notification_type === 'day_before' ? 'Reminder: ' : 'Event: '}
+                  {formatDate(n.event.start_date)}
+                  {n.event.time && ` @ ${n.event.time}`}
+                </p>
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>

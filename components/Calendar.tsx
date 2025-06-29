@@ -1,3 +1,4 @@
+// components/Calendar.tsx - Using week-level event rendering
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
@@ -5,7 +6,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isTod
 import { Event } from '@/types'
 import EventModal from './EventModal'
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
-import EventBar from './Eventbar'
+import WeekEventBar from '@/components/WeekEventBar'
 import { supabase } from '@/lib/supabase'
 
 interface CalendarProps {
@@ -86,7 +87,6 @@ export default function Calendar({ events, user }: CalendarProps) {
     }
   }
 
-
   const previousMonth = () => setCurrentDate(subMonths(currentDate, 1))
   const nextMonth = () => setCurrentDate(addMonths(currentDate, 1))
   const goToToday = () => setCurrentDate(new Date())
@@ -147,7 +147,7 @@ export default function Calendar({ events, user }: CalendarProps) {
         {/* Calendar Grid */}
         <div className="p-4">
           {/* Day Headers */}
-          <div className="grid grid-cols-7 mb-2">
+          <div className="grid grid-cols-7 mb-2" style={{ gap: '1px' }}>
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
               <div key={day} className="text-center text-sm font-semibold text-gray-600 py-2">
                 {day}
@@ -155,39 +155,49 @@ export default function Calendar({ events, user }: CalendarProps) {
             ))}
           </div>
 
-          {/* Calendar Days */}
-
-        <div className="grid grid-cols-7 gap-px bg-gray-200 rounded-lg overflow-visible">
-
-            {calendarDays.map((day, idx) => (
-              <div
-                key={idx}
-                onClick={() => handleDayClick(day)}
-                className={`
-                  bg-white min-h-[100px] sm:min-h-[120px] p-2 cursor-pointer hover:bg-gray-50 transition-colors relative
-                  ${!isSameMonth(day, currentDate) ? 'text-gray-400 bg-gray-50' : 'text-gray-900'}
-                  ${isToday(day) ? 'bg-blue-50 hover:bg-blue-100' : ''}
-                `}
-              >
-                <div className={`
-                  text-sm font-medium mb-1
-                  ${isToday(day) ? 'text-blue-600 font-semibold' : ''}
-                `}>
-                  {format(day, 'd')}
-                </div>
-                
-                {/* Event Bars */}
-                <div className="relative">
-                  <EventBar
+          {/* Calendar Weeks */}
+          <div className="space-y-px">
+            {Array.from({ length: Math.ceil(calendarDays.length / 7) }, (_, weekIndex) => {
+              const weekStart = weekIndex * 7
+              const weekDays = calendarDays.slice(weekStart, weekStart + 7)
+              
+              return (
+                <div key={weekIndex} className="relative">
+                  {/* Week grid */}
+                  <div className="grid grid-cols-7" style={{ gap: '1px' }}>
+                    {weekDays.map((day, dayIndex) => (
+                      <div
+                        key={`${weekIndex}-${dayIndex}`}
+                        onClick={() => handleDayClick(day)}
+                        className={`
+                          relative bg-white min-h-[100px] sm:min-h-[120px] p-2 cursor-pointer hover:bg-gray-50 transition-colors
+                          ${!isSameMonth(day, currentDate) ? 'text-gray-400 bg-gray-50' : 'text-gray-900'}
+                          ${isToday(day) ? 'bg-blue-50 hover:bg-blue-100' : ''}
+                        `}
+                        style={{ 
+                          border: '1px solid #e5e7eb'
+                        }}
+                      >
+                        {/* Day number */}
+                        <div className={`
+                          text-sm font-medium mb-1 relative z-30
+                          ${isToday(day) ? 'text-blue-600 font-semibold' : ''}
+                        `}>
+                          {format(day, 'd')}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Week-level event bars */}
+                  <WeekEventBar
                     events={events}
-                    currentDay={day}
-                    monthStart={monthStart}
-                    monthEnd={monthEnd}
+                    weekDays={weekDays}
                     onEventClick={handleEventClick}
                   />
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </div>
