@@ -41,6 +41,7 @@ export default function NotificationBell({ userId }: { userId: string }) {
       clearInterval(interval1)
       clearInterval(interval2)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId])
 
   // fetch next 7 days

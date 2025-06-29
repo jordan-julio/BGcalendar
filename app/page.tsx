@@ -12,6 +12,7 @@ import { Calendar as CalendarIcon, Users } from 'lucide-react'
 
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // hooks/usePWAInstall.ts
 'use client'
 
@@ -28,7 +29,7 @@ export function usePWAInstall(): PWAInstallState {
   const checkIfInstalled = useCallback(() => {
     const standalone = 
       window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator).standalone ||
+      (window.navigator as any).standalone ||
       document.referrer.includes('android-app://') ||
       localStorage.getItem('pwa-installed') === 'true'
     

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // components/PWAInstallPrompt.tsx
 'use client'
 

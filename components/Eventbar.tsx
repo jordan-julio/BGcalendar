@@ -14,7 +14,7 @@ interface EventBarProps {
   onEventClick: (event: Event) => void
 }
 
-export default function EventBar({ events, currentDay, weekDays, monthStart, monthEnd, onEventClick }: EventBarProps) {
+export default function EventBar({ events, currentDay, weekDays, onEventClick }: EventBarProps) {
   // If weekDays is provided, use the new week-based logic
   if (weekDays && weekDays.length > 0) {
     const currentDayIndex = weekDays.findIndex(day => isSameDay(day, currentDay))
@@ -218,8 +218,6 @@ export default function EventBar({ events, currentDay, weekDays, monthStart, mon
   return (
     <div className="space-y-1">
       {dayEvents.slice(0, 3).map((event, idx) => {
-        const eventStart = new Date(event.start_date)
-        const eventEnd = new Date(event.end_date)
         const color = getEventColor(event.id)
         
         return (

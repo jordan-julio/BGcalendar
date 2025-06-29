@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // components/Calendar.tsx - Using week-level event rendering
 'use client'
 
@@ -41,8 +42,6 @@ export default function Calendar({ events, user }: CalendarProps) {
     fetchRole()
   }, [])
 
-  const monthStart = startOfMonth(currentDate)
-  const monthEnd = endOfMonth(currentDate)
   const calendarDays = useMemo(() => {
     const start = startOfMonth(currentDate)
     const end = endOfMonth(currentDate)
