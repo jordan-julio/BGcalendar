@@ -4,6 +4,7 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Event } from '@/types'
+import { NotificationService } from '@/lib/NotificationService'
 
 interface EventModalProps {
   event: Event | null
@@ -71,7 +72,9 @@ export default function EventModal({ event, date, onClose, user, role }: EventMo
 
         if (error) throw error
       }
-
+      await NotificationService.getInstance().setupNotifications(user.id)
+      // Optionally force an immediate check:
+      await NotificationService.getInstance().triggerNotificationCheck()
       onClose()
     } catch (error) {
       console.error('Error saving event:', error)
