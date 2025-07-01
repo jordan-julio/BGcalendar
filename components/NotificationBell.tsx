@@ -17,30 +17,55 @@ export default function NotificationBell({ userId }: { userId: string }) {
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([])
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [hasPermission, setHasPermission] = useState(Notification.permission === 'granted')
+
+  // FIXED: Android-compatible notification sending
+  const sendTestNotification = async (title: string, body: string) => {
+    try {
+      if ('serviceWorker' in navigator) {
+        const registration = await navigator.serviceWorker.ready
+        await registration.showNotification(title, {
+          body,
+          icon: '/icon-192x192.png',
+          badge: '/icon-192x192.png',
+          tag: 'permission-test',
+          data: { url: '/' },
+          //vibrate: [200, 100, 200],
+          requireInteraction: false
+        })
+        console.log('✅ Android-compatible test notification sent')
+      } else {
+        // Fallback for non-PWA environments
+        new Notification(title, { body })
+      }
+    } catch (error) {
+      console.error('❌ Test notification failed:', error)
+    }
+  }
+
+  // FIXED: Android-compatible permission handling
   const handleEnableNotifications = async () => {
     if (Notification.permission === 'default') {
-      const permission = await Notification.requestPermission();
-      setHasPermission(permission === 'granted');
+      const permission = await Notification.requestPermission()
+      setHasPermission(permission === 'granted')
       
-      // Test immediately after granting permission
-      // You can optionally trigger a test notification here if needed
-      // Example:
+      // FIXED: Send test notification via Service Worker
       if (permission === 'granted') {
-        new Notification('Notifications enabled!', { body: 'You will now receive event alerts.' });
+        await sendTestNotification(
+          'Notifications Enabled! 🔔', 
+          'You will now receive event alerts from BG Events'
+        )
       }
     }
-  };
+  }
 
+  // FIXED: Only run permission check when user clicks, not automatically
   useEffect(() => {
-    handleEnableNotifications();
-  }, []);
+    // Remove automatic permission request - only check current status
+    setHasPermission(Notification.permission === 'granted')
+  }, [])
+
   useEffect(() => {
     if (!userId) return
-
-    // Request permission on mount if needed
-    if (Notification.permission === 'default') {
-      Notification.requestPermission().then(p => setHasPermission(p === 'granted'))
-    }
 
     fetchUpcomingEvents()
     
@@ -119,8 +144,9 @@ export default function NotificationBell({ userId }: { userId: string }) {
     <div className="relative">
       <button
         onClick={() => {
+          // FIXED: Only request permission when user explicitly clicks
           if (Notification.permission === 'default') {
-            Notification.requestPermission().then(p => setHasPermission(p === 'granted'))
+            handleEnableNotifications()
           }
           setDropdownOpen(o => !o)
         }}
@@ -157,7 +183,7 @@ export default function NotificationBell({ userId }: { userId: string }) {
               <h3 className="font-semibold text-gray-900">Upcoming Events</h3>
               {!hasPermission && (
                 <button
-                  onClick={() => Notification.requestPermission().then(p => setHasPermission(p === 'granted'))}
+                  onClick={handleEnableNotifications}
                   className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition-colors"
                 >
                   Enable Notifications

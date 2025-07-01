@@ -372,23 +372,6 @@ export default function Home() {
             <Calendar events={events} user={user} />
           </>
         )}
-        <button
-          onClick={async () => {
-            if ('serviceWorker' in navigator && Notification.permission === 'granted') {
-              const registration = await navigator.serviceWorker.ready;
-              await registration.showNotification('Android Test', {
-                body: 'Testing Android notifications',
-                icon: '/icon-192x192.png',
-                tag: 'android-test'
-              });
-            } else {
-              alert(`Permission: ${Notification.permission}, SW: ${'serviceWorker' in navigator}`);
-            }
-          }}
-          className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs"
-        >
-          Android Test
-        </button>
       </main>
     </div>
   )
