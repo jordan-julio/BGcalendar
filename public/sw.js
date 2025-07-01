@@ -1,6 +1,6 @@
-// public/sw.js - Simplified version focused on core functionality
+// public/sw.js - Fixed version that handles chunk loading properly
 
-const CACHE_NAME = 'bg-events-app-v1.4';
+const CACHE_NAME = 'bg-events-app-v1.5'; // Increment version number
 const urlsToCache = [
   '/',
   '/login',
@@ -9,59 +9,139 @@ const urlsToCache = [
   '/icon-512x512.png',
 ];
 
-// Install: cache app shell
+// Install: cache only essential assets
 self.addEventListener('install', event => {
-  console.log('[SW] Install');
+  console.log('[SW] Install v1.5');
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(urlsToCache))
-      .then(() => self.skipWaiting())
-  );
-});
-
-// Activate: clear old caches
-self.addEventListener('activate', event => {
-  console.log('[SW] Activate');
-  event.waitUntil(
-    caches.keys()
-      .then(names => Promise.all(
-        names.map(name => {
-          if (name !== CACHE_NAME) {
-            console.log('[SW] Deleting cache', name);
-            return caches.delete(name);
-          }
-        })
-      ))
-      .then(() => self.clients.claim())
-  );
-});
-
-// Fetch: cache-first for static assets
-self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET' ||
-      !event.request.url.startsWith(self.location.origin)) {
-    return;
-  }
-
-  event.respondWith(
-    caches.match(event.request)
-      .then(resp => resp || fetch(event.request).then(networkResp => {
-        if (!networkResp || networkResp.status !== 200 || networkResp.type !== 'basic') {
-          return networkResp;
-        }
-        const clone = networkResp.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        return networkResp;
-      }))
-      .catch(() => {
-        if (event.request.mode === 'navigate') {
-          return caches.match('/');
-        }
+      .then(cache => {
+        // Only cache critical assets, not JS chunks
+        return cache.addAll(urlsToCache);
+      })
+      .then(() => {
+        console.log('[SW] Assets cached, skipping waiting');
+        return self.skipWaiting();
+      })
+      .catch(err => {
+        console.error('[SW] Cache failed:', err);
       })
   );
 });
 
-// Background sync for checking notifications
+// Activate: clear old caches and take control
+self.addEventListener('activate', event => {
+  console.log('[SW] Activate v1.5');
+  event.waitUntil(
+    Promise.all([
+      // Clear old caches
+      caches.keys().then(names => 
+        Promise.all(
+          names.map(name => {
+            if (name !== CACHE_NAME) {
+              console.log('[SW] Deleting old cache:', name);
+              return caches.delete(name);
+            }
+          })
+        )
+      ),
+      // Take control immediately
+      self.clients.claim()
+    ]).then(() => {
+      console.log('[SW] Ready and in control');
+    })
+  );
+});
+
+// Fetch: Network-first for JS chunks, cache-first for static assets
+self.addEventListener('fetch', event => {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  // Skip non-GET requests and external URLs
+  if (request.method !== 'GET' || !url.origin.includes(self.location.origin)) {
+    return;
+  }
+
+  // Handle different types of requests
+  if (url.pathname.includes('/_next/static/chunks/')) {
+    // JS Chunks: Always try network first to avoid stale chunk issues
+    event.respondWith(
+      fetch(request)
+        .then(response => {
+          // If network succeeds, cache the new chunk
+          if (response.ok) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(request, responseClone);
+            });
+          }
+          return response;
+        })
+        .catch(() => {
+          // If network fails, try cache as fallback
+          console.log('[SW] Network failed for chunk, trying cache:', url.pathname);
+          return caches.match(request);
+        })
+    );
+  } else if (url.pathname.includes('/_next/static/')) {
+    // Other static assets: Cache-first
+    event.respondWith(
+      caches.match(request)
+        .then(response => {
+          if (response) {
+            return response;
+          }
+          return fetch(request).then(networkResponse => {
+            if (networkResponse.ok) {
+              const responseClone = networkResponse.clone();
+              caches.open(CACHE_NAME).then(cache => {
+                cache.put(request, responseClone);
+              });
+            }
+            return networkResponse;
+          });
+        })
+    );
+  } else if (urlsToCache.includes(url.pathname) || url.pathname === '/') {
+    // Core pages: Cache-first with network fallback
+    event.respondWith(
+      caches.match(request)
+        .then(response => {
+          if (response) {
+            return response;
+          }
+          return fetch(request).then(networkResponse => {
+            if (networkResponse.ok) {
+              const responseClone = networkResponse.clone();
+              caches.open(CACHE_NAME).then(cache => {
+                cache.put(request, responseClone);
+              });
+            }
+            return networkResponse;
+          });
+        })
+        .catch(() => {
+          // If both cache and network fail, try to serve index for navigation
+          if (request.mode === 'navigate') {
+            return caches.match('/');
+          }
+        })
+    );
+  } else {
+    // Everything else: Network-first
+    event.respondWith(
+      fetch(request)
+        .catch(() => {
+          // For navigation requests, fallback to cached index
+          if (request.mode === 'navigate') {
+            return caches.match('/');
+          }
+        })
+    );
+  }
+});
+
+// Background sync for notifications
 self.addEventListener('sync', event => {
   console.log('[SW] Background sync event:', event.tag);
   
@@ -69,15 +149,22 @@ self.addEventListener('sync', event => {
     event.waitUntil(
       self.clients.matchAll().then(clients => {
         if (clients.length > 0) {
-          // Tell the client to check notifications
           clients[0].postMessage({ type: 'CHECK_NOTIFICATIONS_REQUEST' });
+        } else {
+          // Fallback notification when no clients available
+          return self.registration.showNotification('BG Events', {
+            body: 'Check for new events and updates',
+            icon: '/icon-192x192.png',
+            tag: 'background-check',
+            data: { url: '/' }
+          });
         }
       })
     );
   }
 });
 
-// Push notifications (for server-sent notifications if you implement them later)
+// Push notifications
 self.addEventListener('push', event => {
   console.log('[SW] Push received');
   
@@ -133,23 +220,22 @@ self.addEventListener('notificationclick', event => {
   }
 });
 
-self.addEventListener('sync', event => {
-  console.log('[SW] Background sync event:', event.tag);
-  
-  if (event.tag === 'check-notifications') {
+// Handle chunk loading errors by clearing cache
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'CLEAR_CHUNK_CACHE') {
     event.waitUntil(
-      self.clients.matchAll().then(clients => {
-        if (clients.length > 0) {
-          clients[0].postMessage({ type: 'CHECK_NOTIFICATIONS_REQUEST' });
-        } else {
-          // No clients available, try to show a generic notification
-          return self.registration.showNotification('BG Events', {
-            body: 'Check for new events and updates',
-            icon: '/icon-192x192.png',
-            tag: 'background-check',
-            data: { url: '/' }
-          });
-        }
+      caches.open(CACHE_NAME).then(cache => {
+        return cache.keys().then(requests => {
+          return Promise.all(
+            requests
+              .filter(request => request.url.includes('/_next/static/chunks/'))
+              .map(request => cache.delete(request))
+          );
+        });
+      }).then(() => {
+        console.log('[SW] Chunk cache cleared');
+        // Notify client that cache is cleared
+        event.ports[0].postMessage({ success: true });
       })
     );
   }
