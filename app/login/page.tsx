@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import { ArrowLeftIcon } from 'lucide-react'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -42,9 +43,15 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
-        <h2 className="text-2xl font-bold text-center mb-6">
-          {isSignUp ? 'Create Account' : 'Sign In'}
-        </h2>
+        <div>
+          <button onClick={() => router.back()} className="flex flex-row items-center text-blue-600 rounded-2xl px-2 hover:bg-blue-50 transition">
+            <ArrowLeftIcon className="h-5 w-5" />
+            <span>Go Back</span>
+          </button>
+          <h2 className="text-2xl font-bold text-center mb-6">
+            {isSignUp ? 'Create Account' : 'Sign In'}
+          </h2>
+        </div>
 
         <form onSubmit={handleAuth} className="space-y-4">
           <div>
