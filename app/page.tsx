@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
@@ -14,6 +13,7 @@ import { NotificationService } from '@/lib/NotificationService'
 
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -148,7 +148,7 @@ export default function Home() {
 
   // Realtime subscription - separate effect to avoid loops
   useEffect(() => {
-    if (!events.length && loading) return // Wait for initial load
+    if (loading) return // Wait for initial load
     
     console.log('📡 Setting up realtime subscription...')
     
@@ -177,7 +177,7 @@ export default function Home() {
       console.log('📡 Cleaning up realtime subscription')
       channel.unsubscribe()
     }
-  }, [loading]) // Only depends on loading state
+  }, [loading, events.length]) // Added events.length to dependencies
 
   // Page visibility handler - debounced
   useEffect(() => {
