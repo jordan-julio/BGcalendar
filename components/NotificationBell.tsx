@@ -17,7 +17,21 @@ export default function NotificationBell({ userId }: { userId: string }) {
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([])
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [hasPermission, setHasPermission] = useState(Notification.permission === 'granted')
+  const handleEnableNotifications = async () => {
+    if (Notification.permission === 'default') {
+      const permission = await Notification.requestPermission();
+      setHasPermission(permission === 'granted');
+      
+      // Test immediately after granting permission
+      if (permission === 'granted' && notificationService.current) {
+        await notificationService.current.testNotification();
+      }
+    }
+  };
 
+  useEffect(() => {
+    handleEnableNotifications();
+  }, []);
   useEffect(() => {
     if (!userId) return
 

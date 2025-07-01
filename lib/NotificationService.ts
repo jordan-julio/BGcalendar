@@ -33,10 +33,11 @@ export class NotificationService {
   private async initServiceWorker() {
     if ('serviceWorker' in navigator) {
       try {
-        this.registration = await navigator.serviceWorker.ready
-        console.log('✅ Service Worker ready for notifications')
+        // Wait for existing registration or register new one
+        this.registration = await navigator.serviceWorker.ready;
+        console.log('✅ Service Worker ready for notifications');
       } catch (err) {
-        console.error('❌ SW not ready:', err)
+        console.error('❌ SW not ready:', err);
       }
     }
   }
