@@ -1,4 +1,4 @@
-#Tue Jul 01 10:28:46 ICT 2025
+#Tue Jul 01 12:56:33 ICT 2025
 base.0=C\:\\Users\\jorda\\OneDrive\\Desktop\\calendar-app\\android-wrapper\\app\\build\\intermediates\\dex\\release\\minifyReleaseWithR8\\classes.dex
 renamed.0=classes.dex
 path.0=classes.dex

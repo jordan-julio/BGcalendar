@@ -1,13 +1,12 @@
-// public/sw.js
+// public/sw.js - Simplified version focused on core functionality
 
-const CACHE_NAME = 'bg-events-app-v1.2'; // bump to force refresh
+const CACHE_NAME = 'bg-events-app-v1.4';
 const urlsToCache = [
   '/',
   '/login',
   '/manifest.json',
   '/icon-192x192.png',
   '/icon-512x512.png',
-  '/favicon.ico'
 ];
 
 // Install: cache app shell
@@ -62,15 +61,31 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// Push notifications
+// Background sync for checking notifications
+self.addEventListener('sync', event => {
+  console.log('[SW] Background sync event:', event.tag);
+  
+  if (event.tag === 'check-notifications') {
+    event.waitUntil(
+      self.clients.matchAll().then(clients => {
+        if (clients.length > 0) {
+          // Tell the client to check notifications
+          clients[0].postMessage({ type: 'CHECK_NOTIFICATIONS_REQUEST' });
+        }
+      })
+    );
+  }
+});
+
+// Push notifications (for server-sent notifications if you implement them later)
 self.addEventListener('push', event => {
   console.log('[SW] Push received');
+  
   let data = {
     title: 'BG Events',
     body: 'You have a new notification',
     icon: '/icon-192x192.png',
-    badge: '/icon-192x192.png',
-    eventId: null
+    badge: '/icon-192x192.png'
   };
 
   if (event.data) {
@@ -85,16 +100,11 @@ self.addEventListener('push', event => {
     body: data.body,
     icon: data.icon,
     badge: data.badge,
-    vibrate: [100, 50, 100],
     tag: 'bg-events',
-    data: {
-      url: data.url || '/'
-    },
-    actions: [
-      { action: 'view', title: 'View Event' },
-      { action: 'dismiss', title: 'Dismiss' }
-    ],
-    requireInteraction: true
+    data: { url: data.url || '/' },
+    requireInteraction: false,
+    silent: false,
+    vibrate: [200, 100, 200]
   };
 
   event.waitUntil(
@@ -102,28 +112,23 @@ self.addEventListener('push', event => {
   );
 });
 
-// Notification click
+// Notification click handler
 self.addEventListener('notificationclick', event => {
   console.log('[SW] Notification click', event.action);
   event.notification.close();
 
   if (event.action === 'view' || !event.action) {
     event.waitUntil(
-      clients.matchAll({ type: 'window' }).then(list => {
-        for (const client of list) {
-          if (client.url === self.location.origin + '/' && 'focus' in client) {
+      self.clients.matchAll({ type: 'window' }).then(clients => {
+        // Try to focus existing window
+        for (const client of clients) {
+          if (client.url.includes(self.location.origin) && 'focus' in client) {
             return client.focus();
           }
         }
-        return clients.openWindow('/');
+        // Open new window
+        return self.clients.openWindow('/');
       })
     );
-  }
-});
-
-// Background sync (placeholder)
-self.addEventListener('sync', event => {
-  if (event.tag === 'background-sync') {
-    event.waitUntil(console.log('[SW] Background sync'));
   }
 });

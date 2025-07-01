@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// components/Calendar.tsx - Using week-level event rendering
+// components/Calendar.tsx - Improved version with better event overflow handling
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, addMonths, subMonths } from 'date-fns'
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, addMonths, subMonths, isWithinInterval, startOfDay, endOfDay } from 'date-fns'
 import { Event } from '@/types'
 import EventModal from './EventModal'
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
@@ -52,6 +52,63 @@ export default function Calendar({ events, user }: CalendarProps) {
     
     return eachDayOfInterval({ start: startWeek, end: endWeek })
   }, [currentDate])
+
+  // Calculate minimum height needed for each week based on events
+  const getWeekHeight = (weekDays: Date[]) => {
+    const weekEvents = events.filter(event => {
+      const eventStart = new Date(event.start_date)
+      const eventEnd = new Date(event.end_date)
+      
+      return weekDays.some(day => 
+        isWithinInterval(day, {
+          start: startOfDay(eventStart),
+          end: endOfDay(eventEnd)
+        })
+      )
+    })
+
+    if (weekEvents.length === 0) return 120 // Base height
+
+    // Simulate event placement to count rows
+    const eventPlacements: Array<{ row: number; startIndex: number; endIndex: number }> = []
+    
+    weekEvents.forEach(event => {
+      const eventStart = new Date(event.start_date)
+      const eventEnd = new Date(event.end_date)
+      
+      let startIndex = weekDays.findIndex(day => 
+        day.toDateString() === eventStart.toDateString()
+      )
+      let endIndex = weekDays.findIndex(day => 
+        day.toDateString() === eventEnd.toDateString()
+      )
+      
+      if (startIndex === -1 && eventStart < weekDays[0]) startIndex = 0
+      if (endIndex === -1 && eventEnd > weekDays[6]) endIndex = 6
+      if (startIndex === -1 || endIndex === -1) return
+      
+      let row = 0
+      while (eventPlacements.some(p => 
+        p.row === row && !(endIndex < p.startIndex || startIndex > p.endIndex)
+      )) {
+        row++
+      }
+      
+      eventPlacements.push({ row, startIndex, endIndex })
+    })
+
+    const maxRow = Math.max(...eventPlacements.map(p => p.row), -1)
+    const baseHeight = 120
+    const eventRowHeight = 24
+    const maxVisibleRows = 3
+    const overflowButtonHeight = 20
+    
+    // Height calculation: base + visible event rows + overflow button if needed
+    const neededRows = Math.min(maxRow + 1, maxVisibleRows)
+    const hasOverflow = maxRow >= maxVisibleRows
+    
+    return baseHeight + (neededRows * eventRowHeight) + (hasOverflow ? overflowButtonHeight : 0)
+  }
 
   const handleDayClick = (date: Date) => {
     if (!user || !role) {
@@ -155,10 +212,11 @@ export default function Calendar({ events, user }: CalendarProps) {
           </div>
 
           {/* Calendar Weeks */}
-          <div className="space-y-px">
+          <div className="space-y-1">
             {Array.from({ length: Math.ceil(calendarDays.length / 7) }, (_, weekIndex) => {
               const weekStart = weekIndex * 7
               const weekDays = calendarDays.slice(weekStart, weekStart + 7)
+              const weekHeight = getWeekHeight(weekDays)
               
               return (
                 <div key={weekIndex} className="relative">
@@ -169,12 +227,13 @@ export default function Calendar({ events, user }: CalendarProps) {
                         key={`${weekIndex}-${dayIndex}`}
                         onClick={() => handleDayClick(day)}
                         className={`
-                          relative bg-white min-h-[100px] sm:min-h-[120px] p-2 cursor-pointer hover:bg-gray-50 transition-colors
+                          relative bg-white p-2 cursor-pointer hover:bg-gray-50 transition-colors
                           ${!isSameMonth(day, currentDate) ? 'text-gray-400 bg-gray-50' : 'text-gray-900'}
                           ${isToday(day) ? 'bg-blue-50 hover:bg-blue-100' : ''}
                         `}
                         style={{ 
-                          border: '1px solid #e5e7eb'
+                          border: '1px solid #e5e7eb',
+                          minHeight: `${weekHeight}px`
                         }}
                       >
                         {/* Day number */}
@@ -198,6 +257,18 @@ export default function Calendar({ events, user }: CalendarProps) {
               )
             })}
           </div>
+
+          {/* Legend for dense weeks */}
+          {events.length > 10 && (
+            <div className="mt-4 p-3 bg-gray-50 rounded-lg border">
+              <p className="text-xs text-gray-600 mb-2 font-medium">Tips for busy weeks:</p>
+              <ul className="text-xs text-gray-500 space-y-1">
+                <li>• Click &quot;Show all&quot; to see all events in a week</li>
+                <li>• Hover over events to see full details</li>
+                <li>• Click any event to view or edit details</li>
+              </ul>
+            </div>
+          )}
         </div>
       </div>
 
