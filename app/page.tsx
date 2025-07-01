@@ -1,3 +1,4 @@
+// app/page.tsx - Updated with better notification debugging
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
@@ -8,7 +9,7 @@ import PWAInstallPrompt from '@/components/PWAInstallPrompt'
 import NotificationBell from '@/components/NotificationBell'
 
 import { Event } from '@/types'
-import { Calendar as CalendarIcon, Bell } from 'lucide-react'
+import { Calendar as CalendarIcon, Bell, TestTube, Settings, Trash2 } from 'lucide-react'
 import { NotificationService } from '@/lib/NotificationService'
 
 export default function Home() {
@@ -17,6 +18,7 @@ export default function Home() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isClient, setIsClient] = useState(false)
   
   // Refs to prevent multiple initializations
   const swRegistered = useRef(false)
@@ -24,14 +26,17 @@ export default function Home() {
   const eventsLoaded = useRef(false)
   const notificationService = useRef<NotificationService | null>(null)
 
-  // Initialize notification service once
-  if (!notificationService.current) {
-    notificationService.current = NotificationService.getInstance()
-  }
+  // Client-side only initialization
+  useEffect(() => {
+    setIsClient(true)
+    if (!notificationService.current) {
+      notificationService.current = NotificationService.getInstance()
+    }
+  }, [])
 
   // Service Worker registration - ONLY ONCE
   useEffect(() => {
-    if (swRegistered.current) return
+    if (!isClient || swRegistered.current) return
     
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js')
@@ -41,9 +46,11 @@ export default function Home() {
         })
         .catch(err => console.error('❌ SW registration failed:', err))
     }
-  }, []) // Empty dependency array - run only once
+  }, [isClient])
 
   useEffect(() => {
+    if (!isClient) return
+    
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', (event) => {
         if (event.data.type === 'CHECK_NOTIFICATIONS_REQUEST' && user) {
@@ -52,11 +59,11 @@ export default function Home() {
         }
       });
     }
-  }, [user]);
+  }, [user, isClient]);
 
   // Fetch events function with debouncing
   const fetchEvents = useCallback(async () => {
-    if (eventsLoaded.current) return // Prevent multiple calls
+    if (eventsLoaded.current) return
     
     try {
       console.log('📅 Fetching events (once)...')
@@ -78,13 +85,13 @@ export default function Home() {
     } catch (err) {
       console.error('💥 Error in fetchEvents:', err)
       setError('Failed to load events. Please refresh the page.')
-      eventsLoaded.current = false // Allow retry
+      eventsLoaded.current = false
     } finally {
       setLoading(false)
     }
   }, [])
 
-  // Setup notifications for user - with prevention of multiple calls
+  // Setup notifications for user
   const setupNotificationsForUser = useCallback(async (userId: string) => {
     if (notificationSetup.current || !notificationService.current) return
     
@@ -95,34 +102,35 @@ export default function Home() {
       const success = await notificationService.current.setupNotifications(userId)
       if (success) {
         console.log('✅ Notifications setup successfully')
+        // Clean up old notifications
+        await notificationService.current.cleanupOldNotifications(userId)
       } else {
         console.log('⚠️ Notification setup failed - permission denied')
       }
     } catch (error) {
       console.error('❌ Error setting up notifications:', error)
-      notificationSetup.current = false // Allow retry
+      notificationSetup.current = false
     }
   }, [])
 
-  // Auth and events initialization - ONLY ONCE
+  // Auth and events initialization
   useEffect(() => {
+    if (!isClient) return
+    
     let isMounted = true
     
     const initializeApp = async () => {
       try {
-        // Get initial session
         const { data: { session } } = await supabase.auth.getSession()
         if (!isMounted) return
         
         const currentUser = session?.user ?? null
         setUser(currentUser)
         
-        // Setup notifications for authenticated user
         if (currentUser && !notificationSetup.current) {
           await setupNotificationsForUser(currentUser.id)
         }
         
-        // Fetch events only once
         if (!eventsLoaded.current) {
           await fetchEvents()
         }
@@ -135,7 +143,6 @@ export default function Home() {
 
     initializeApp()
 
-    // Auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return
       
@@ -155,11 +162,11 @@ export default function Home() {
       isMounted = false
       subscription.unsubscribe()
     }
-  }, [fetchEvents, setupNotificationsForUser]) // Dependencies are stable functions
+  }, [fetchEvents, setupNotificationsForUser, isClient])
 
-  // Realtime subscription - separate effect to avoid loops
+  // Realtime subscription
   useEffect(() => {
-    if (loading) return // Wait for initial load
+    if (loading) return
     
     console.log('📡 Setting up realtime subscription...')
     
@@ -188,15 +195,16 @@ export default function Home() {
       console.log('📡 Cleaning up realtime subscription')
       channel.unsubscribe()
     }
-  }, [loading, events.length]) // Added events.length to dependencies
+  }, [loading, events.length])
 
-  // Page visibility handler - debounced
+  // Page visibility handler
   useEffect(() => {
+    if (!isClient) return
+    
     let timeoutId: NodeJS.Timeout
     
     const handleVisibilityChange = () => {
       if (!document.hidden && user && notificationService.current) {
-        // Debounce to prevent spam
         clearTimeout(timeoutId)
         timeoutId = setTimeout(() => {
           console.log('👁️ Page visible, checking notifications...')
@@ -210,16 +218,18 @@ export default function Home() {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       clearTimeout(timeoutId)
     }
-  }, [user])
+  }, [user, isClient])
 
-  // Manual test functions - only for development
+  // Debug functions
   const testNotification = useCallback(async () => {
     if (!notificationService.current) return
     try {
       await notificationService.current.testNotification()
       console.log('✅ Test notification sent')
+      alert('Test notification sent! Check your notifications.')
     } catch (error) {
       console.error('❌ Failed to send test notification:', error)
+      alert('Failed to send test notification. Check console for details.')
     }
   }, [])
 
@@ -228,19 +238,66 @@ export default function Home() {
     try {
       await notificationService.current.triggerNotificationCheck()
       console.log('✅ Notification check triggered')
+      alert('Notification check completed! Check console for details.')
     } catch (error) {
       console.error('❌ Failed to trigger notification check:', error)
     }
   }, [user])
 
+  const forceNotificationSetup = useCallback(async () => {
+    if (!user || !notificationService.current) return
+    try {
+      notificationSetup.current = false
+      notificationService.current.destroy()
+      const success = await notificationService.current.setupNotifications(user.id)
+      notificationSetup.current = success
+      console.log('✅ Force notification setup completed:', success)
+      alert(`Notification setup ${success ? 'successful' : 'failed'}!`)
+    } catch (error) {
+      console.error('❌ Failed to force setup notifications:', error)
+    }
+  }, [user])
+
+  const cleanupNotifications = useCallback(async () => {
+    if (!user) return
+    try {
+      console.log('🧹 Cleaning up notifications...')
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('user_id', user.id)
+      
+      if (error) {
+        console.error('Error cleaning notifications:', error)
+        alert(`Error: ${error.message}`)
+      } else {
+        console.log('✅ All notifications cleaned up')
+        alert('All notifications cleaned up!')
+        // Reset notification service
+        notificationSetup.current = false
+        notificationService.current?.destroy()
+      }
+    } catch (error) {
+      console.error('Failed to clean notifications:', error)
+    }
+  }, [user])
+
   const resetApp = useCallback(() => {
-    // Reset all refs to allow re-initialization
     eventsLoaded.current = false
     notificationSetup.current = false
     setError(null)
     setLoading(true)
     window.location.reload()
   }, [])
+
+  const checkNotificationPermission = useCallback(() => {
+    if (!isClient) {
+      alert('Client not ready yet')
+      return
+    }
+    const permission = Notification.permission
+    alert(`Notification permission: ${permission}\n\nGranted: ${permission === 'granted'}\nService Worker: ${'serviceWorker' in navigator}\nNotifications API: ${'Notification' in window}`)
+  }, [isClient])
 
   return (
     <div className="min-h-screen">
@@ -260,61 +317,50 @@ export default function Home() {
             </div>
 
             <div className="flex items-center space-x-4">
-              {user && <NotificationBell userId={user.id} />}
+              {user && isClient && <NotificationBell userId={user.id} />}
               
-              {/* Debug buttons - only show in development */}
-              {process.env.NODE_ENV === 'development' && user && (
+              {/* Debug buttons - only show when client is ready */}
+              {user && isClient && (
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={testNotification}
-                    className="hidden sm:flex items-center gap-1 px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs"
-                    title="Test notification"
+                    className="flex items-center gap-1 px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded text-sm font-medium transition-colors"
+                    title="Send test notification"
                   >
-                    <Bell className="h-3 w-3" />
-                    Test
+                    <TestTube className="h-4 w-4" />
+                    Test Notification
                   </button>
                   <button
                     onClick={triggerNotificationCheck}
-                    className="hidden sm:flex items-center gap-1 px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded text-xs"
+                    className="flex items-center gap-1 px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded text-sm font-medium transition-colors"
                     title="Check notifications now"
                   >
-                    Check
+                    <Bell className="h-4 w-4" />
+                    Check Now
                   </button>
                   <button
-                    onClick={async () => {
-                      if (!user) return
-                      try {
-                        console.log('🧹 Cleaning up duplicate notifications...')
-                        const { error } = await supabase
-                          .from('notifications')
-                          .delete()
-                          .eq('user_id', user.id)
-                        
-                        if (error) {
-                          console.error('Error cleaning notifications:', error)
-                          alert(`Error: ${error.message}`)
-                        } else {
-                          console.log('✅ All notifications cleaned up')
-                          alert('All notifications cleaned up! The spam should stop.')
-                          // Reset notification service
-                          notificationSetup.current = false
-                          notificationService.current?.destroy()
-                        }
-                      } catch (error) {
-                        console.error('Failed to clean notifications:', error)
-                      }
-                    }}
-                    className="hidden sm:flex items-center gap-1 px-2 py-1 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded text-xs"
-                    title="Clean up duplicate notifications"
+                    onClick={checkNotificationPermission}
+                    className="flex items-center gap-1 px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded text-sm font-medium transition-colors"
+                    title="Check notification status"
                   >
-                    🧹 Clean
+                    <Settings className="h-4 w-4" />
+                    Status
                   </button>
                   <button
-                    onClick={resetApp}
-                    className="hidden sm:flex items-center gap-1 px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs"
-                    title="Reset app"
+                    onClick={forceNotificationSetup}
+                    className="flex items-center gap-1 px-3 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded text-sm font-medium transition-colors"
+                    title="Force notification setup"
                   >
-                    Reset
+                    <Settings className="h-4 w-4" />
+                    Setup
+                  </button>
+                  <button
+                    onClick={cleanupNotifications}
+                    className="flex items-center gap-1 px-3 py-1 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded text-sm font-medium transition-colors"
+                    title="Clean up notifications"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Clean
                   </button>
                 </div>
               )}
@@ -347,7 +393,7 @@ export default function Home() {
         ) : (
           <>
             {/* Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
               <Card
                 label="Total Events"
                 value={events.length}
@@ -363,8 +409,18 @@ export default function Home() {
                 icon={<CalendarIcon className="h-8 w-8 text-green-500 opacity-20" />}
               />
               <Card
+                label="Next 24 Hours"
+                value={events.filter(e => {
+                  const eventDate = new Date(e.start_date)
+                  const now = new Date()
+                  const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+                  return eventDate >= now && eventDate <= next24Hours
+                }).length}
+                icon={<Bell className="h-8 w-8 text-orange-500 opacity-20" />}
+              />
+              <Card
                 label="Notifications"
-                value={user ? 'Active' : 'Sign in'}
+                value={user ? (isClient && Notification.permission === 'granted' ? 'Enabled' : 'Disabled') : 'Sign in'}
                 icon={<Bell className="h-8 w-8 text-purple-500 opacity-20" />}
               />
             </div>
