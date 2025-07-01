@@ -23,8 +23,10 @@ export default function NotificationBell({ userId }: { userId: string }) {
       setHasPermission(permission === 'granted');
       
       // Test immediately after granting permission
-      if (permission === 'granted' && notificationService.current) {
-        await notificationService.current.testNotification();
+      // You can optionally trigger a test notification here if needed
+      // Example:
+      if (permission === 'granted') {
+        new Notification('Notifications enabled!', { body: 'You will now receive event alerts.' });
       }
     }
   };
