@@ -43,6 +43,17 @@ export default function Home() {
     }
   }, []) // Empty dependency array - run only once
 
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data.type === 'CHECK_NOTIFICATIONS_REQUEST' && user) {
+          console.log('📨 SW requested notification check');
+          notificationService.current?.checkAndSendNotifications(user.id);
+        }
+      });
+    }
+  }, [user]);
+
   // Fetch events function with debouncing
   const fetchEvents = useCallback(async () => {
     if (eventsLoaded.current) return // Prevent multiple calls

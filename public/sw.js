@@ -132,3 +132,25 @@ self.addEventListener('notificationclick', event => {
     );
   }
 });
+
+self.addEventListener('sync', event => {
+  console.log('[SW] Background sync event:', event.tag);
+  
+  if (event.tag === 'check-notifications') {
+    event.waitUntil(
+      self.clients.matchAll().then(clients => {
+        if (clients.length > 0) {
+          clients[0].postMessage({ type: 'CHECK_NOTIFICATIONS_REQUEST' });
+        } else {
+          // No clients available, try to show a generic notification
+          return self.registration.showNotification('BG Events', {
+            body: 'Check for new events and updates',
+            icon: '/icon-192x192.png',
+            tag: 'background-check',
+            data: { url: '/' }
+          });
+        }
+      })
+    );
+  }
+});
