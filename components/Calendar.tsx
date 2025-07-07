@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// components/Calendar.tsx - Improved version with better event overflow handling
+// components/Calendar.tsx - Fixed version with correct date handling
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
@@ -119,7 +119,13 @@ export default function Calendar({ events, user }: CalendarProps) {
     if (role === 'Member') {
       return // prevent adding
     }
-    setSelectedDate(date)
+
+    console.log('🗓️ Selected date:', date.toDateString(), 'Local format:', format(date, 'yyyy-MM-dd'))
+    
+    // FIXED: Create a new Date object to avoid timezone issues
+    const localDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    
+    setSelectedDate(localDate)
     setSelectedEvent(null)
     setShowModal(true)
   }
@@ -146,6 +152,16 @@ export default function Calendar({ events, user }: CalendarProps) {
   const previousMonth = () => setCurrentDate(subMonths(currentDate, 1))
   const nextMonth = () => setCurrentDate(addMonths(currentDate, 1))
   const goToToday = () => setCurrentDate(new Date())
+
+  const handleAddEventClick = () => {
+    // FIXED: Use today's date but create a proper local date
+    const today = new Date()
+    const localToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    
+    setSelectedDate(localToday)
+    setSelectedEvent(null)
+    setShowModal(true)
+  }
 
   return (
     <>
@@ -185,11 +201,7 @@ export default function Calendar({ events, user }: CalendarProps) {
               
               {role && (role === 'Super Admin' || role === 'Admin') && (
                 <button
-                  onClick={() => {
-                    setSelectedDate(new Date())
-                    setSelectedEvent(null)
-                    setShowModal(true)
-                  }}
+                  onClick={handleAddEventClick}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow-lg"
                 >
                   <Plus className="h-4 w-4" />

@@ -13,8 +13,15 @@ export default function AuthButton({ user }: { user: any }) {
   }
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.refresh()
+    const { error } = await supabase.auth.signOut().then(({ error }) => {
+      router.refresh()
+      return { error }
+    })
+    if (error) {
+      console.error(error)
+      return alert('Error signing out')
+    }
+
   }
 
   return user ? (

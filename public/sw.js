@@ -199,6 +199,40 @@ self.addEventListener('push', event => {
   );
 });
 
+self.addEventListener('pushsubscriptionchange', event => {
+  console.log('[SW] Push subscription changed');
+  event.waitUntil(
+    self.registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)
+    })
+    .then(subscription => {
+      // Send new subscription to server
+      return fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(subscription)
+      });
+    })
+  );
+});
+
+// Helper function to convert VAPID key
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, '+')
+    .replace(/_/g, '/');
+
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 // Notification click handler
 self.addEventListener('notificationclick', event => {
   console.log('[SW] Notification click', event.action);
@@ -240,3 +274,61 @@ self.addEventListener('message', event => {
     );
   }
 });
+
+self.addEventListener('push', function(event) {
+  console.log('Push received:', event);
+
+  if (!event.data) {
+    return;
+  }
+
+  const data = event.data.json();
+  
+  const options = {
+    body: data.body,
+    icon: data.icon || '/icon-192x192.png',
+    badge: data.badge || '/badge-icon.png',
+    data: data.data,
+    actions: data.actions || [],
+    requireInteraction: true, // Keep notification visible
+    tag: 'calendar-events' // Prevent multiple notifications
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, options)
+  );
+});
+
+// Handle notification clicks
+self.addEventListener('notificationclick', function(event) {
+  console.log('Notification clicked:', event);
+  
+  event.notification.close();
+
+  if (event.action === 'view') {
+    // Open the events page
+    event.waitUntil(
+      clients.openWindow(event.notification.data.url || '/events')
+    );
+  } else if (event.action === 'dismiss') {
+    // Just close the notification
+    return;
+  } else {
+    // Default action - open the app
+    event.waitUntil(
+      clients.openWindow('/')
+    );
+  }
+});
+
+// Handle background sync for offline capability
+self.addEventListener('sync', function(event) {
+  if (event.tag === 'background-sync') {
+    event.waitUntil(doBackgroundSync());
+  }
+});
+
+function doBackgroundSync() {
+  // Handle any background tasks
+  return fetch('/api/sync');
+}

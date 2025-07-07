@@ -1,7 +1,7 @@
-// components/NotificationBell.tsx - Fixed version with test button and better logic
+// components/NotificationBell.tsx - Fixed version that never gets cut off
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Bell, BellRing, TestTube } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
@@ -20,6 +20,8 @@ export default function NotificationBell({ userId }: { userId: string }) {
   const [hasPermission, setHasPermission] = useState(false)
   const [isRequestingPermission, setIsRequestingPermission] = useState(false)
   const [isClient, setIsClient] = useState(false)
+  
+  const bellRef = useRef<HTMLDivElement>(null)
 
   // Client-side initialization
   useEffect(() => {
@@ -49,7 +51,6 @@ export default function NotificationBell({ userId }: { userId: string }) {
           tag: 'test-notification',
           data: { url: '/' },
           requireInteraction: false,
-          //vibrate: [300, 100, 300]
         })
         alert('Test notification sent! Check your notifications.')
       } else {
@@ -207,143 +208,192 @@ export default function NotificationBell({ userId }: { userId: string }) {
     return urgent
   }).length
 
+  // Calculate dropdown position dynamically
+  const getDropdownStyle = () => {
+    if (!bellRef.current || !isClient) return {}
+    
+    const bellRect = bellRef.current.getBoundingClientRect()
+    const screenWidth = window.innerWidth
+    const dropdownWidth = Math.min(320, screenWidth - 32) // 320px or screen width minus 32px padding
+    const padding = 16 // 1rem
+    
+    // Calculate available space
+    const spaceOnRight = screenWidth - bellRect.right - padding
+    const spaceOnLeft = bellRect.left - padding
+    
+    const style: React.CSSProperties = {
+      width: `${dropdownWidth}px`,
+      maxWidth: `calc(100vw - 2rem)`,
+      minWidth: `${Math.min(280, screenWidth - 32)}px`
+    }
+    
+    if (spaceOnRight >= dropdownWidth) {
+      // Enough space on right
+      style.right = 0
+    } else if (spaceOnLeft >= dropdownWidth) {
+      // Not enough space on right, but enough on left
+      style.left = 0
+    } else {
+      // Not enough space on either side, position to prevent cutoff
+      const bellCenter = bellRect.left + bellRect.width / 2
+      const dropdownLeft = bellCenter - dropdownWidth / 2
+      
+      if (dropdownLeft < padding) {
+        // Would overflow left, align to left edge with padding
+        style.left = -bellRect.left + padding
+      } else if (dropdownLeft + dropdownWidth > screenWidth - padding) {
+        // Would overflow right, align to right edge with padding
+        style.right = -(screenWidth - bellRect.right) + padding
+      } else {
+        // Center it under the bell
+        style.left = bellCenter - bellRect.left - dropdownWidth / 2
+      }
+    }
+    
+    return style
+  }
+
   return (
-      <div className="relative">
-        {isClient && (
-          <>
-            <button
-              onClick={() => setDropdownOpen(o => !o)}
+    <div className="relative" ref={bellRef}>
+      {isClient && (
+        <>
+          <button
+            onClick={() => setDropdownOpen(o => !o)}
             className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors"
             title={hasPermission ? 'View upcoming events' : 'Enable browser notifications'}
           >
-        {urgentCount > 0 ? (
-          <BellRing className="h-5 w-5 text-orange-600" />
-        ) : (
-          <Bell className="h-5 w-5 text-gray-600" />
-        )}
-        
-        {urgentCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full h-4 w-4 text-xs flex items-center justify-center font-medium">
-            {urgentCount > 9 ? '9+' : urgentCount}
-          </span>
-        )}
-        
-        {!hasPermission && (
-          <span className="absolute -top-1 -right-1 bg-yellow-500 rounded-full h-3 w-3 border border-white" />
-        )}
+            {urgentCount > 0 ? (
+              <BellRing className="h-5 w-5 text-orange-600" />
+            ) : (
+              <Bell className="h-5 w-5 text-gray-600" />
+            )}
+            
+            {urgentCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full h-4 w-4 text-xs flex items-center justify-center font-medium">
+                {urgentCount > 9 ? '9+' : urgentCount}
+              </span>
+            )}
+            
+            {!hasPermission && (
+              <span className="absolute -top-1 -right-1 bg-yellow-500 rounded-full h-3 w-3 border border-white" />
+            )}
           </button>
 
           {dropdownOpen && (
-        <>
-          {/* Backdrop to close dropdown */}
-          <div 
-            className="fixed inset-0 z-40" 
-            onClick={() => setDropdownOpen(false)}
-          />
-          
-          <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg z-50 max-h-96 overflow-hidden border border-gray-200">
-            <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-              <h3 className="font-semibold text-gray-900">Upcoming Events</h3>
-              <div className="flex items-center gap-2">
-                {hasPermission && (
-                  <button
-                    onClick={sendTestNotification}
-                    className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 transition-colors"
-                    title="Send test notification"
-                  >
-                    <TestTube className="h-3 w-3" />
-                    Test
-                  </button>
-                )}
-                {!hasPermission && (
-                  <button
-                    onClick={handleEnableNotifications}
-                    disabled={isRequestingPermission}
-                    className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition-colors disabled:opacity-50"
-                  >
-                    {isRequestingPermission ? 'Requesting...' : 'Enable Notifications'}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="max-h-80 overflow-y-auto">
-              {upcomingEvents.length === 0 ? (
-                <div className="p-6 text-center text-gray-500">
-                  <Bell className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                  <p>No upcoming events</p>
-                  <p className="text-xs text-gray-400 mt-1">Events for the next 48 hours will appear here</p>
+            <>
+              {/* Backdrop to close dropdown */}
+              <div 
+                className="fixed inset-0 z-40" 
+                onClick={() => setDropdownOpen(false)}
+              />
+              
+              {/* FIXED: Smart positioned dropdown that never gets cut off */}
+              <div 
+                className="absolute mt-2 bg-white rounded-lg shadow-lg z-50 max-h-96 overflow-hidden border border-gray-200"
+                style={getDropdownStyle()}
+              >
+                <div className="p-3 sm:p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                  <h3 className="font-semibold text-gray-900 text-sm sm:text-base truncate">Upcoming Events</h3>
+                  <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0 ml-2">
+                    {hasPermission && (
+                      <button
+                        onClick={sendTestNotification}
+                        className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 transition-colors"
+                        title="Send test notification"
+                      >
+                        <TestTube className="h-3 w-3" />
+                        <span className="hidden sm:inline">Test</span>
+                      </button>
+                    )}
+                    {!hasPermission && (
+                      <button
+                        onClick={handleEnableNotifications}
+                        disabled={isRequestingPermission}
+                        className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition-colors disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {isRequestingPermission ? 'Requesting...' : 'Enable'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-              ) : (
-                upcomingEvents.map(event => {
-                  const eventStatus = getEventStatus(event)
-                  
-                  return (
-                    <div 
-                      key={event.id} 
-                      className={`p-3 border-b border-gray-100 hover:bg-gray-50 last:border-none transition-colors ${
-                        eventStatus.urgent ? 'bg-orange-50' : ''
-                      }`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-gray-900 truncate" title={event.title}>
-                            {event.title}
-                          </p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className={`text-xs font-medium ${eventStatus.color}`}>
-                              {eventStatus.status}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {formatDate(event.start_date)}
-                            </span>
-                            {event.time && (
-                              <span className="text-xs text-gray-500">
-                                @ {event.time}
-                              </span>
+
+                <div className="max-h-80 overflow-y-auto">
+                  {upcomingEvents.length === 0 ? (
+                    <div className="p-6 text-center text-gray-500">
+                      <Bell className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+                      <p className="text-sm">No upcoming events</p>
+                      <p className="text-xs text-gray-400 mt-1">Events for the next 48 hours will appear here</p>
+                    </div>
+                  ) : (
+                    upcomingEvents.map(event => {
+                      const eventStatus = getEventStatus(event)
+                      
+                      return (
+                        <div 
+                          key={event.id} 
+                          className={`p-3 border-b border-gray-100 hover:bg-gray-50 last:border-none transition-colors ${
+                            eventStatus.urgent ? 'bg-orange-50' : ''
+                          }`}
+                        >
+                          <div className="flex justify-between items-start gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-gray-900 truncate text-sm" title={event.title}>
+                                {event.title}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <span className={`text-xs font-medium ${eventStatus.color}`}>
+                                  {eventStatus.status}
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  {formatDate(event.start_date)}
+                                </span>
+                                {event.time && (
+                                  <span className="text-xs text-gray-500">
+                                    @ {event.time}
+                                  </span>
+                                )}
+                              </div>
+                              {event.description && (
+                                <p className="text-xs text-gray-600 mt-1 truncate" title={event.description}>
+                                  {event.description}
+                                </p>
+                              )}
+                            </div>
+                            
+                            {eventStatus.urgent && (
+                              <div className="flex-shrink-0">
+                                <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
+                              </div>
                             )}
                           </div>
-                          {event.description && (
-                            <p className="text-xs text-gray-600 mt-1 truncate" title={event.description}>
-                              {event.description}
-                            </p>
-                          )}
                         </div>
-                        
-                        {eventStatus.urgent && (
-                          <div className="ml-2 flex-shrink-0">
-                            <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-
-            {upcomingEvents.length > 0 && (
-              <div className="p-3 bg-gray-50 border-t border-gray-200">
-                <p className="text-xs text-gray-500 text-center">
-                  {urgentCount > 0 ? (
-                    <span className="text-orange-600 font-medium">
-                      {urgentCount} event{urgentCount === 1 ? '' : 's'} happening soon
-                    </span>
-                  ) : (
-                    'All events are more than 24 hours away'
+                      )
+                    })
                   )}
-                </p>
-                {hasPermission && (
-                  <p className="text-xs text-gray-400 text-center mt-1">
-                    You&apos;ll receive notifications for upcoming events
-                  </p>
+                </div>
+
+                {upcomingEvents.length > 0 && (
+                  <div className="p-3 bg-gray-50 border-t border-gray-200">
+                    <p className="text-xs text-gray-500 text-center">
+                      {urgentCount > 0 ? (
+                        <span className="text-orange-600 font-medium">
+                          {urgentCount} event{urgentCount === 1 ? '' : 's'} happening soon
+                        </span>
+                      ) : (
+                        'All events are more than 24 hours away'
+                      )}
+                    </p>
+                    {hasPermission && (
+                      <p className="text-xs text-gray-400 text-center mt-1">
+                        You&apos;ll receive notifications for upcoming events
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </>
-        )}
-      </>
       )}
     </div>
   )
