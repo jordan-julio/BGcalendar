@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-// app/page.tsx - FIXED VERSION with proper loading state management
+// app/page.tsx - Fixed hydration-safe version
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react'
@@ -16,14 +15,17 @@ import { Calendar as CalendarIcon, Bell, TestTube, Settings, MoreVertical, X } f
 
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [user, setUser] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isClient, setIsClient] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [showNotificationPrefs, setShowNotificationPrefs] = useState(false)
   
-  // Loading state trackers
+  // *** HYDRATION FIX: Separate client-side and SSR states ***
+  const [isClient, setIsClient] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  
+  // Loading state trackers - only meaningful after mount
   const [authLoaded, setAuthLoaded] = useState(false)
   const [eventsLoaded, setEventsLoaded] = useState(false)
   const [fcmInitialized, setFcmInitialized] = useState(false)
@@ -32,40 +34,32 @@ export default function Home() {
   const swRegistered = useRef(false)
   const previousUserId = useRef<string | null>(null)
 
-  // *** KEY FIX: Centralized loading state management ***
+  // *** CRITICAL: Handle hydration properly ***
   useEffect(() => {
-    console.log('🔍 Loading state check:', {
+    setMounted(true)
+    setIsClient(true)
+  }, [])
+
+  // *** HYDRATION SAFE: Only show loading after mount ***
+  const shouldShowLoading = mounted && (!authLoaded || (user && !eventsLoaded))
+
+  // *** Loading state management - only after mount ***
+  useEffect(() => {
+    if (!mounted) return
+    
+    console.log('🔍 Loading state check (client-side only):', {
+      mounted,
       authLoaded,
       eventsLoaded,
       fcmInitialized,
       user: !!user,
-      currentLoading: loading
+      shouldShowLoading
     })
-    
-    // App is ready when:
-    // 1. Auth is loaded AND
-    // 2. Either we have no user (showing login) OR (we have user AND events are loaded)
-    // 3. FCM initialization is not blocking (either done or failed)
-    
-    const shouldStopLoading = authLoaded && (
-      !user || // No user = show login page 
-      (user && eventsLoaded) // User exists and events loaded
-    )
-    
-    if (shouldStopLoading && loading) {
-      console.log('✅ All required data loaded, stopping loading state')
-      setLoading(false)
-    }
-  }, [authLoaded, eventsLoaded, fcmInitialized, user, loading])
+  }, [mounted, authLoaded, eventsLoaded, fcmInitialized, user, shouldShowLoading])
 
-  // Client-side only initialization
+  // Service Worker Registration (client-side only)
   useEffect(() => {
-    setIsClient(true)
-  }, [])
-
-  // Service Worker Registration (non-blocking)
-  useEffect(() => {
-    if (!isClient || swRegistered.current) return
+    if (!mounted || !isClient || swRegistered.current) return
     
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js')
@@ -75,11 +69,11 @@ export default function Home() {
         })
         .catch(err => console.error('❌ SW registration failed:', err))
     }
-  }, [isClient])
+  }, [mounted, isClient])
 
   // Fetch events function
   const fetchEvents = useCallback(async () => {
-    if (eventsLoaded) return // Prevent multiple calls
+    if (eventsLoaded) return
     
     try {
       console.log('📅 Fetching events...')
@@ -101,13 +95,13 @@ export default function Home() {
       console.error('💥 Error in fetchEvents:', err)
       setError('Failed to load events. Please refresh the page.')
     } finally {
-      setEventsLoaded(true) // *** CRITICAL: Always mark as loaded ***
+      setEventsLoaded(true)
     }
   }, [eventsLoaded])
 
-  // FCM Initialization (non-blocking)
+  // FCM Initialization (client-side only)
   const initializeFCM = useCallback(async () => {
-    if (!user || fcmInitialized) return
+    if (!user || fcmInitialized || !mounted) return
     
     try {
       console.log('🔔 Starting FCM initialization...')
@@ -119,19 +113,19 @@ export default function Home() {
     } catch (error) {
       console.error('❌ FCM initialization error:', error)
     } finally {
-      setFcmInitialized(true) // *** CRITICAL: Always mark as done ***
+      setFcmInitialized(true)
     }
-  }, [user, fcmInitialized])
+  }, [user, fcmInitialized, mounted])
 
-  // Auth and events initialization - SINGLE useEffect
+  // Auth and events initialization - ONLY after mount
   useEffect(() => {
-    if (!isClient) return
+    if (!mounted || !isClient) return
     
     let isMounted = true
     
     const initializeApp = async () => {
       try {
-        console.log('🚀 Initializing app...')
+        console.log('🚀 Initializing app (client-side only)...')
         
         // Get initial session
         const { data: { session } } = await supabase.auth.getSession()
@@ -155,7 +149,7 @@ export default function Home() {
       } catch (error) {
         console.error('❌ App initialization error:', error)
         setError('Failed to initialize app. Please refresh the page.')
-        // Even on error, mark auth as loaded so we can show the error
+        // Even on error, mark as loaded so we can show the error
         setAuthLoaded(true)
         setEventsLoaded(true)
       }
@@ -189,8 +183,8 @@ export default function Home() {
         
         // Reset states for signed out user
         setEvents([])
-        setEventsLoaded(true) // No need to load events without user
-        setFcmInitialized(true) // No need to init FCM without user
+        setEventsLoaded(true)
+        setFcmInitialized(true)
         
       } else if (event === 'SIGNED_IN' && newUser) {
         console.log('👋 User signed in:', newUser.id)
@@ -211,18 +205,18 @@ export default function Home() {
       isMounted = false
       subscription.unsubscribe()
     }
-  }, [fetchEvents, isClient])
+  }, [mounted, isClient, fetchEvents])
 
   // FCM initialization (runs after user is set)
   useEffect(() => {
-    if (user && isClient && authLoaded && eventsLoaded) {
+    if (user && mounted && isClient && authLoaded && eventsLoaded) {
       initializeFCM()
     }
-  }, [user, isClient, authLoaded, eventsLoaded, initializeFCM])
+  }, [user, mounted, isClient, authLoaded, eventsLoaded, initializeFCM])
 
-  // Realtime subscription (non-blocking)
+  // Realtime subscription (client-side only)
   useEffect(() => {
-    if (!user || !authLoaded || !eventsLoaded) return
+    if (!user || !authLoaded || !eventsLoaded || !mounted) return
     
     console.log('📡 Setting up realtime subscription...')
     
@@ -251,24 +245,25 @@ export default function Home() {
       console.log('📡 Cleaning up realtime subscription')
       channel.unsubscribe()
     }
-  }, [user, authLoaded, eventsLoaded])
+  }, [user, authLoaded, eventsLoaded, mounted])
 
-  // *** EMERGENCY TIMEOUT to prevent infinite loading ***
+  // Emergency timeout to prevent infinite loading
   useEffect(() => {
+    if (!mounted) return
+    
     const emergencyTimeout = setTimeout(() => {
-      if (loading) {
-        console.log('🚨 EMERGENCY: Forcing app to load after 10 seconds')
+      if (!authLoaded || (user && !eventsLoaded)) {
+        console.log('🚨 EMERGENCY: Forcing states to complete after 10 seconds')
         setAuthLoaded(true)
         setEventsLoaded(true)
         setFcmInitialized(true)
-        setLoading(false)
       }
-    }, 10000) // 10 second emergency timeout
+    }, 10000)
     
     return () => clearTimeout(emergencyTimeout)
-  }, [loading])
+  }, [mounted, authLoaded, eventsLoaded, user])
 
-  // Debug functions (keep existing ones)
+  // Debug functions
   const testFCMNotification = useCallback(async () => {
     if (!user) {
       alert('Please sign in first to test notifications')
@@ -343,28 +338,16 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
 
   const resetApp = useCallback(() => {
     console.log('🔄 Resetting app...')
-    // Reset all states
-    setAuthLoaded(false)
-    setEventsLoaded(false)
-    setFcmInitialized(false)
-    setError(null)
-    setLoading(true)
     window.location.reload()
   }, [])
 
-  // *** IMPROVED LOADING CHECK ***
-  console.log('🔍 Current app state:', {
-    loading,
-    authLoaded,
-    eventsLoaded,
-    fcmInitialized,
-    hasUser: !!user,
-    hasError: !!error,
-    eventsCount: events.length
-  })
+  // *** HYDRATION SAFE: Don't render anything until mounted ***
+  if (!mounted) {
+    return null // Return null during SSR to avoid hydration mismatch
+  }
 
-  // *** RENDER LOGIC - MUCH CLEARER ***
-  if (loading) {
+  // *** NOW SAFE: All content is client-side only ***
+  if (shouldShowLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -412,14 +395,13 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
     )
   }
 
-  // *** REST OF YOUR COMPONENT REMAINS THE SAME ***
+  // Main app content (same as before, but now hydration-safe)
   return (
     <div className="min-h-screen bg-gray-50">
       <PWAInstallPrompt />
 
-      {/* Header - keep existing header code */}
+      {/* Header */}
       <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-sm">
-        {/* Your existing header content */}
         <div className="px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
@@ -585,7 +567,7 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
   )
 }
 
-// Card component remains the same
+// Card component
 function Card({ label, value, icon }: { label: string; value: number | string; icon: React.ReactNode }) {
   return (
     <div className="bg-white rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-sm border border-gray-200">
