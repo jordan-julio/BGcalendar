@@ -1,4 +1,5 @@
-// app/api/cron/notifications/route.ts
+/* eslint-disable @typescript-eslint/no-unused-vars */
+// Core logic for sending notifications for events in the next 24 hours
 import { NextRequest, NextResponse } from 'next/server'
 import admin from 'firebase-admin'
 import { createClient } from '@supabase/supabase-js'
@@ -13,7 +14,7 @@ if (!admin.apps.length) {
         privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
       })
     })
-    console.log('✅ Firebase Admin SDK initialized for cron')
+    console.log('✅ Firebase Admin SDK initialized')
   } catch (error) {
     console.error('❌ Firebase Admin SDK initialization failed:', error)
   }
@@ -31,105 +32,69 @@ const supabaseAdmin = createClient(
   }
 )
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    console.log('🕕 Starting daily notification cron job...')
-
-    // Verify authorization (Vercel Cron or your own secret)
-    const authHeader = req.headers.get('authorization')
-    const cronSecret = process.env.CRON_SECRET
-
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      console.log('❌ Unauthorized cron attempt')
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const now = new Date()
-    let totalNotificationsSent = 0
-    const results = []
-
-    // Define timezones to check (you can expand this)
-    const timezones = [
-      { name: 'UTC', tz: 'UTC' },
-      { name: 'US Eastern', tz: 'America/New_York' },
-      { name: 'UK', tz: 'Europe/London' },
-      { name: 'Japan', tz: 'Asia/Tokyo' },
-      { name: 'Indonesia', tz: 'Asia/Jakarta' } // Added for your location
-    ]
-
-    for (const timezone of timezones) {
-      try {
-        const currentTimeInTZ = new Date().toLocaleString('en-US', { timeZone: timezone.tz })
-        const currentHour = new Date(currentTimeInTZ).getHours()
-        
-        console.log(`🌍 Checking ${timezone.name} (${timezone.tz}): ${currentHour}:00`)
-        
-        // Check if it's 6 AM in this timezone
-        if (currentHour === 6) {
-          console.log(`⏰ It's 6 AM in ${timezone.name}, processing notifications...`)
-          const notificationsSent = await processNotificationsForTimezone(timezone.tz)
-          totalNotificationsSent += notificationsSent
-          
-          results.push({
-            timezone: timezone.name,
-            hour: currentHour,
-            notificationsSent
-          })
-        } else {
-          results.push({
-            timezone: timezone.name,
-            hour: currentHour,
-            notificationsSent: 0,
-            note: 'Not 6 AM'
-          })
-        }
-      } catch (error) {
-        console.error(`❌ Error processing timezone ${timezone.name}:`, error)
-        results.push({
-          timezone: timezone.name,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        })
-      }
-    }
-
-    console.log(`✅ Daily notification cron completed. Sent ${totalNotificationsSent} notifications.`)
+    console.log('🚀 Starting 24-hour event notification process...')
     
-    return NextResponse.json({ 
-      success: true, 
-      message: `Daily cron completed. Sent ${totalNotificationsSent} notifications`,
-      timestamp: now.toISOString(),
-      results
-    })
+    // Get current time and 24 hours ahead
+    const now = new Date()
+    const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000)
 
-  } catch (error) {
-    console.error('❌ Error in daily notification cron:', error)
-    return NextResponse.json(
-      { 
-        error: 'Internal server error',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    )
-  }
-}
+    console.log(`📅 Looking for events between ${now.toISOString()} and ${next24Hours.toISOString()}`)
 
-async function processNotificationsForTimezone(timezone: string): Promise<number> {
-  try {
-    console.log(`🌍 Processing notifications for timezone: ${timezone}`)
+    // Step 1: Get all events in the next 24 hours
+    const { data: upcomingEvents, error: eventsError } = await supabaseAdmin
+      .from('events')
+      .select('id, title, start_date, description')
+      .gte('start_date', now.toISOString())
+      .lte('start_date', next24Hours.toISOString())
+      .order('start_date', { ascending: true })
 
-    // Get all users with FCM tokens (simplified approach)
+    if (eventsError) {
+      console.error('❌ Error fetching events:', eventsError)
+      return NextResponse.json(
+        { error: 'Failed to fetch events', details: eventsError.message },
+        { status: 500 }
+      )
+    }
+
+    console.log(`📊 Found ${upcomingEvents?.length || 0} events in next 24 hours`)
+
+    if (!upcomingEvents || upcomingEvents.length === 0) {
+      return NextResponse.json({
+        success: true,
+        message: 'No events found in next 24 hours',
+        results: {
+          eventsFound: 0,
+          usersNotified: 0,
+          notificationsSent: 0
+        }
+      })
+    }
+
+    // Step 2: Get all users with FCM tokens
     const { data: allTokens, error: tokensError } = await supabaseAdmin
       .from('fcm_tokens')
       .select('user_id, token')
 
     if (tokensError) {
       console.error('❌ Error fetching FCM tokens:', tokensError)
-      return 0
+      return NextResponse.json(
+        { error: 'Failed to fetch FCM tokens', details: tokensError.message },
+        { status: 500 }
+      )
     }
 
     if (!allTokens || allTokens.length === 0) {
-      console.log(`📭 No users with FCM tokens found`)
-      return 0
+      return NextResponse.json({
+        success: true,
+        message: 'No users with FCM tokens found',
+        results: {
+          eventsFound: upcomingEvents.length,
+          usersNotified: 0,
+          notificationsSent: 0
+        }
+      })
     }
 
     // Group tokens by user
@@ -143,190 +108,129 @@ async function processNotificationsForTimezone(timezone: string): Promise<number
 
     console.log(`👥 Found ${userTokensMap.size} unique users with FCM tokens`)
 
-    // Get all events in the next 24 hours (full event details)
-    const upcomingEvents = await getEventsForNext24Hours()
-    
-    if (upcomingEvents.length === 0) {
-      console.log(`📅 No events in next 24 hours, skipping notifications`)
-      return 0
-    }
-
-    console.log(`📅 Found ${upcomingEvents.length} events in next 24 hours:`, 
-      upcomingEvents.map(e => `"${e.title}" at ${e.start_date}`))
-
+    // Step 3: Send notifications to all users about upcoming events
     let totalNotificationsSent = 0
+    let usersNotified = 0
+    const errors: string[] = []
 
-    // Send individual notifications for each event to all users
-    for (const event of upcomingEvents) {
-      console.log(`📨 Processing event: "${event.title}" (${event.start_date})`)
-      
-      for (const [userId, tokens] of userTokensMap) {
-        try {
-          const success = await sendEventNotification(userId, tokens, event)
-          if (success) {
-            totalNotificationsSent++
-          }
-        } catch (error) {
-          console.error(`❌ Error sending notification to user ${userId} for event ${event.id}:`, error)
-        }
-      }
-    }
+    // Create notification content
+    const eventTitles = upcomingEvents.map(e => e.title).slice(0, 3)
+    const moreEventsCount = upcomingEvents.length > 3 ? upcomingEvents.length - 3 : 0
 
-    return totalNotificationsSent
-
-  } catch (error) {
-    console.error(`❌ Error processing timezone ${timezone}:`, error)
-    return 0
-  }
-}
-
-async function getEventsForNext24Hours(): Promise<Array<{id: string, title: string, start_date: string, description?: string}>> {
-  try {
-    const now = new Date()
-    const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-
-    console.log(`📅 Checking for events between ${now.toISOString()} and ${next24Hours.toISOString()}`)
-
-    const { data: events, error } = await supabaseAdmin
-      .from('events')
-      .select('id, title, start_date, description')
-      .gte('start_date', now.toISOString())
-      .lte('start_date', next24Hours.toISOString())
-      .order('start_date', { ascending: true })
-
-    if (error) {
-      console.error('❌ Error fetching events:', error)
-      return []
-    }
-
-    return events || []
-  } catch (error) {
-    console.error('❌ Error checking events:', error)
-    return []
-  }
-}
-
-async function sendEventNotification(
-  userId: string, 
-  tokens: string[], 
-  event: {id: string, title: string, start_date: string, description?: string}
-): Promise<boolean> {
-  try {
-    if (tokens.length === 0) {
-      console.log(`📭 No FCM tokens for user ${userId}`)
-      return false
-    }
-
-    // Format the event time
-    const eventDate = new Date(event.start_date)
-    const now = new Date()
-    const hoursUntil = Math.round((eventDate.getTime() - now.getTime()) / (1000 * 60 * 60))
+    const title = '📅 Upcoming Events'
+    let notificationBody: string
     
-    // Create time-aware message
-    let timeText = ''
-    if (hoursUntil < 1) {
-      timeText = 'starting soon'
-    } else if (hoursUntil === 1) {
-      timeText = 'in 1 hour'
-    } else if (hoursUntil < 24) {
-      timeText = `in ${hoursUntil} hours`
+    if (upcomingEvents.length === 1) {
+      notificationBody = `"${upcomingEvents[0].title}" is coming up in the next 24 hours`
     } else {
-      timeText = 'tomorrow'
+      const eventsList = eventTitles.join(', ')
+      const moreText = moreEventsCount > 0 ? ` and ${moreEventsCount} more` : ''
+      notificationBody = `${upcomingEvents.length} events coming up: ${eventsList}${moreText}`
     }
 
-    const title = `📅 Upcoming Event: ${event.title}`
-    const body = `Event "${event.title}" is ${timeText} (${eventDate.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    })})`
+    console.log('📝 Notification payload:', { title, body: notificationBody })
 
-    const message = {
-      notification: {
-        title,
-        body
-      },
-      data: {
-        type: 'event_reminder',
-        event_id: event.id,
-        event_title: event.title,
-        event_start_date: event.start_date,
-        hours_until: hoursUntil.toString(),
-        timestamp: new Date().toISOString()
-      },
-      tokens
-    }
+    // Process each user
+    for (const [userId, tokens] of userTokensMap) {
+      try {
+        console.log(`📨 Sending notification to user ${userId} with ${tokens.length} tokens`)
+        
+        const message = {
+          notification: {
+            title,
+            body: notificationBody,
+          },
+          data: {
+            type: 'events_reminder',
+            events_count: upcomingEvents.length.toString(),
+            timestamp: new Date().toISOString()
+          },
+          tokens
+        }
 
-    console.log(`📨 Sending event notification to user ${userId} for "${event.title}" (${tokens.length} tokens)`)
-
-    const response = await admin.messaging().sendEachForMulticast(message)
-    
-    const successCount = response.successCount
-    console.log(`📊 Event notification result for user ${userId}: ${successCount}/${tokens.length} successful`)
-
-    // Log detailed errors
-    response.responses.forEach((resp, idx) => {
-      if (!resp.success && resp.error) {
-        console.error(`❌ Token ${idx + 1} failed:`, {
-          code: resp.error.code,
-          message: resp.error.message
+        const response = await admin.messaging().sendEachForMulticast(message)
+        
+        console.log(`📊 FCM Response for user ${userId}:`, {
+          successCount: response.successCount,
+          failureCount: response.failureCount
         })
+
+        // Track successful notifications
+        if (response.successCount > 0) {
+          usersNotified++
+          totalNotificationsSent += response.successCount
+
+          // Log notification to database
+          await supabaseAdmin
+            .from('notifications_log')
+            .insert({
+              user_id: userId,
+              title,
+              body: notificationBody,
+              data: {
+                type: 'events_reminder',
+                events_count: upcomingEvents.length,
+                success_count: response.successCount,
+                failure_count: response.failureCount
+              },
+              status: 'sent'
+            })
+        }
+
+        // Remove invalid tokens
+        if (response.failureCount > 0) {
+          const invalidTokens: string[] = []
+          response.responses.forEach((resp, idx) => {
+            if (!resp.success && resp.error) {
+              const errorCode = resp.error.code
+              if (['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'].includes(errorCode)) {
+                invalidTokens.push(tokens[idx])
+              }
+            }
+          })
+
+          if (invalidTokens.length > 0) {
+            console.log(`🧹 Removing ${invalidTokens.length} invalid tokens for user ${userId}`)
+            await supabaseAdmin
+              .from('fcm_tokens')
+              .delete()
+              .in('token', invalidTokens)
+          }
+        }
+
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error'
+        console.error(`❌ Error sending notification to user ${userId}:`, error)
+        errors.push(`User ${userId}: ${errorMsg}`)
       }
+    }
+
+    console.log(`✅ Notification process completed. Sent ${totalNotificationsSent} notifications to ${usersNotified} users`)
+
+    return NextResponse.json({
+      success: true,
+      message: `Sent notifications to ${usersNotified}/${userTokensMap.size} users about ${upcomingEvents.length} upcoming events`,
+      results: {
+        eventsFound: upcomingEvents.length,
+        usersNotified,
+        notificationsSent: totalNotificationsSent,
+        errors
+      },
+      events: upcomingEvents.map(e => ({
+        id: e.id,
+        title: e.title,
+        start_date: e.start_date
+      }))
     })
 
-    // Remove invalid tokens
-    if (response.failureCount > 0) {
-      const invalidTokens: string[] = []
-      response.responses.forEach((resp, idx) => {
-        if (!resp.success && resp.error) {
-          const errorCode = resp.error.code
-          if (['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'].includes(errorCode)) {
-            invalidTokens.push(tokens[idx])
-          }
-        }
-      })
-
-      if (invalidTokens.length > 0) {
-        console.log(`🧹 Removing ${invalidTokens.length} invalid tokens for user ${userId}`)
-        await supabaseAdmin
-          .from('fcm_tokens')
-          .delete()
-          .in('token', invalidTokens)
-      }
-    }
-
-    // Log notification
-    if (successCount > 0) {
-      await supabaseAdmin
-        .from('notifications_log')
-        .insert({
-          user_id: userId,
-          title,
-          body,
-          data: { 
-            type: 'event_reminder',
-            event_id: event.id,
-            event_title: event.title,
-            event_start_date: event.start_date,
-            hours_until: hoursUntil,
-            success_count: successCount,
-            failure_count: response.failureCount
-          },
-          status: 'sent'
-        })
-    }
-
-    return successCount > 0
   } catch (error) {
-    console.error('❌ Error sending event notification:', error)
-    return false
+    console.error('❌ Error in notification process:', error)
+    return NextResponse.json(
+      {
+        error: 'Failed to send notifications',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    )
   }
-}
-
-// Support POST requests too (for manual testing)
-export async function POST(req: NextRequest) {
-  console.log('📨 Manual cron trigger via POST')
-  return GET(req)
 }
