@@ -10,7 +10,8 @@ firebase.initializeApp({
   projectId: process.env.FIREBASE_PROJECT_ID,
   storageBucket: process.env.STORAGE_BUCKET,
   messagingSenderId: process.env.MESSAGING_SENDER_ID,
-  appId: process.env.APP_ID
+  appId: process.env.APP_ID,
+  measurementId: "G-0HS8NL71G1"
 });
 
 // Retrieve an instance of Firebase Messaging
