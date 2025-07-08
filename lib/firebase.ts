@@ -4,12 +4,12 @@ import { getAnalytics } from "firebase/analytics";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBaiQkoUMxMX3wE_tdyMJiOpRnC3oLMBt8",
-  authDomain: "calendarbg-b8b21.firebaseapp.com",
-  projectId: "calendarbg-b8b21",
-  storageBucket: "calendarbg-b8b21.appspot.com",
-  messagingSenderId: "966785744813",
-  appId: "1:966785744813:web:6f9affcc6adb8687366b24",
+  apiKey: process.env.API_KEY,
+  authDomain: process.env.AUTH_DOMAIN,
+  projectId: process.env.PROJECT_ID,
+  storageBucket: process.env.STORAGE_BUCKET,
+  messagingSenderId: process.env.MESSAGING_SENDER_ID,
+  appId: process.env.APP_ID,
   measurementId: "G-0HS8NL71G1"
 };
 
