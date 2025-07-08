@@ -9,9 +9,11 @@ import PWAInstallPrompt from '@/components/PWAInstallPrompt'
 import NotificationBell from '@/components/NotificationBell'
 import FCMTokenService from '@/lib/FCMTokenService';
 import NotificationPreferences from '@/components/NotificationPreferences';
+import { useColorManagement } from '@/hooks/useColorManagement'
 
 import { Event } from '@/types'
-import { Calendar as CalendarIcon, Bell, TestTube, Settings, MoreVertical, X } from 'lucide-react'
+import { Calendar as CalendarIcon, Bell, TestTube, Settings, MoreVertical, X, Palette } from 'lucide-react'
+import ColorManagementModal from '@/components/ColorManagementModal';
 
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([])
@@ -29,6 +31,8 @@ export default function Home() {
   const [authLoaded, setAuthLoaded] = useState(false)
   const [eventsLoaded, setEventsLoaded] = useState(false)
   const [fcmInitialized, setFcmInitialized] = useState(false)
+  const [showColorManagement, setShowColorManagement] = useState(false)
+  const { refreshColors, forceUpdate } = useColorManagement();
   
   // Refs to prevent multiple initializations
   const swRegistered = useRef(false)
@@ -433,6 +437,13 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
                   {isMobileMenuOpen && (
                     <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
                       <button
+                        onClick={() => { setShowColorManagement(true); setIsMobileMenuOpen(false); }}
+                        className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                      >
+                        <Palette className="h-4 w-4 text-indigo-600" />
+                        Manage Colors
+                      </button>
+                      <button
                         onClick={() => { testFCMNotification(); setIsMobileMenuOpen(false); }}
                         className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
                       >
@@ -480,6 +491,14 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
                   >
                     <Settings className="h-4 w-4" />
                     <span className="hidden xl:inline">Settings</span>
+                  </button>
+                  <button
+                    onClick={() => setShowColorManagement(true)}
+                    className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Manage event colors"
+                  >
+                    <Palette className="h-4 w-4" />
+                    <span className="hidden xl:inline">Colors</span>
                   </button>
                 </div>
               )}
@@ -560,9 +579,20 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
             />
           </div>
 
-          <Calendar events={events} user={user} />
+          <Calendar events={events} user={user} key={forceUpdate} />
         </div>
       </main>
+      {showColorManagement && (
+        <ColorManagementModal
+          events={events}
+          onClose={() => setShowColorManagement(false)}
+          onColorsChanged={() => {
+            refreshColors()
+            // Force re-render of calendar
+            setEvents([...events])
+          }}
+        />
+      )}
     </div>
   )
 }
