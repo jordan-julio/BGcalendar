@@ -6,12 +6,12 @@ importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-comp
 
 // Initialize Firebase (replace with your config)
 firebase.initializeApp({
-  apiKey: process.env.NEXT_PUBLIC_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_AUTH_DOMAIN,
+  apiKey: "AIzaSyD7hx4pw9GTLS7F3C7Hwi7nYujtkciDOSc",
+  authDomain: "calendarbg-b8b21.firebaseapp.com",
   projectId: "calendarbg-b8b21",
-  storageBucket: process.env.NEXT_PUBLIC_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_APP_ID,
+  storageBucket: "calendarbg-b8b21.firebasestorage.app",
+  messagingSenderId: "966785744813",
+  appId: "1:966785744813:web:6f9affcc6adb8687366b24",
   measurementId: "G-0HS8NL71G1"
 });
 
