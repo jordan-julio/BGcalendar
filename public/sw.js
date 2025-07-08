@@ -1,6 +1,25 @@
-// public/sw.js - Fixed version that handles chunk loading properly
+// public/sw.js - Combined PWA + FCM Service Worker
 
-const CACHE_NAME = 'bg-events-app-v1.5'; // Increment version number
+// Import Firebase scripts
+importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js');
+
+// Initialize Firebase (replace with your config)
+firebase.initializeApp({
+  apiKey: process.env.NEXT_PUBLIC_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_AUTH_DOMAIN,
+  projectId: "calendarbg-b8b21",
+  storageBucket: process.env.NEXT_PUBLIC_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_APP_ID,
+  measurementId: "G-0HS8NL71G1"
+});
+
+// Initialize Firebase Messaging
+const messaging = firebase.messaging();
+
+// Cache configuration
+const CACHE_NAME = 'bg-events-app-v1.6';
 const urlsToCache = [
   '/',
   '/login',
@@ -9,31 +28,22 @@ const urlsToCache = [
   '/icon-512x512.png',
 ];
 
-// Install: cache only essential assets
+// Install event - cache assets
 self.addEventListener('install', event => {
-  console.log('[SW] Install v1.5');
+  console.log('[SW] Install v1.6 with FCM');
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => {
-        // Only cache critical assets, not JS chunks
-        return cache.addAll(urlsToCache);
-      })
-      .then(() => {
-        console.log('[SW] Assets cached, skipping waiting');
-        return self.skipWaiting();
-      })
-      .catch(err => {
-        console.error('[SW] Cache failed:', err);
-      })
+      .then(cache => cache.addAll(urlsToCache))
+      .then(() => self.skipWaiting())
+      .catch(err => console.error('[SW] Cache failed:', err))
   );
 });
 
-// Activate: clear old caches and take control
+// Activate event - clean old caches
 self.addEventListener('activate', event => {
-  console.log('[SW] Activate v1.5');
+  console.log('[SW] Activate v1.6 with FCM');
   event.waitUntil(
     Promise.all([
-      // Clear old caches
       caches.keys().then(names => 
         Promise.all(
           names.map(name => {
@@ -44,31 +54,24 @@ self.addEventListener('activate', event => {
           })
         )
       ),
-      // Take control immediately
       self.clients.claim()
-    ]).then(() => {
-      console.log('[SW] Ready and in control');
-    })
+    ])
   );
 });
 
-// Fetch: Network-first for JS chunks, cache-first for static assets
+// Fetch event - network first for chunks, cache first for assets
 self.addEventListener('fetch', event => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET requests and external URLs
   if (request.method !== 'GET' || !url.origin.includes(self.location.origin)) {
     return;
   }
 
-  // Handle different types of requests
   if (url.pathname.includes('/_next/static/chunks/')) {
-    // JS Chunks: Always try network first to avoid stale chunk issues
     event.respondWith(
       fetch(request)
         .then(response => {
-          // If network succeeds, cache the new chunk
           if (response.ok) {
             const responseClone = response.clone();
             caches.open(CACHE_NAME).then(cache => {
@@ -77,62 +80,13 @@ self.addEventListener('fetch', event => {
           }
           return response;
         })
-        .catch(() => {
-          // If network fails, try cache as fallback
-          console.log('[SW] Network failed for chunk, trying cache:', url.pathname);
-          return caches.match(request);
-        })
-    );
-  } else if (url.pathname.includes('/_next/static/')) {
-    // Other static assets: Cache-first
-    event.respondWith(
-      caches.match(request)
-        .then(response => {
-          if (response) {
-            return response;
-          }
-          return fetch(request).then(networkResponse => {
-            if (networkResponse.ok) {
-              const responseClone = networkResponse.clone();
-              caches.open(CACHE_NAME).then(cache => {
-                cache.put(request, responseClone);
-              });
-            }
-            return networkResponse;
-          });
-        })
+        .catch(() => caches.match(request))
     );
   } else if (urlsToCache.includes(url.pathname) || url.pathname === '/') {
-    // Core pages: Cache-first with network fallback
     event.respondWith(
       caches.match(request)
-        .then(response => {
-          if (response) {
-            return response;
-          }
-          return fetch(request).then(networkResponse => {
-            if (networkResponse.ok) {
-              const responseClone = networkResponse.clone();
-              caches.open(CACHE_NAME).then(cache => {
-                cache.put(request, responseClone);
-              });
-            }
-            return networkResponse;
-          });
-        })
+        .then(response => response || fetch(request))
         .catch(() => {
-          // If both cache and network fail, try to serve index for navigation
-          if (request.mode === 'navigate') {
-            return caches.match('/');
-          }
-        })
-    );
-  } else {
-    // Everything else: Network-first
-    event.respondWith(
-      fetch(request)
-        .catch(() => {
-          // For navigation requests, fallback to cached index
           if (request.mode === 'navigate') {
             return caches.match('/');
           }
@@ -141,121 +95,119 @@ self.addEventListener('fetch', event => {
   }
 });
 
-// Background sync for notifications
+// Handle FCM background messages
+messaging.onBackgroundMessage((payload) => {
+  console.log('[SW] Received FCM background message:', payload);
+  
+  const notificationTitle = payload.notification?.title || payload.data?.title || 'BG Events';
+  const notificationOptions = {
+    body: payload.notification?.body || payload.data?.body || 'You have a new notification',
+    icon: payload.notification?.icon || '/icon-192x192.png',
+    badge: '/icon-192x192.png',
+    tag: payload.data?.tag || `fcm-${Date.now()}`,
+    data: payload.data || {},
+    requireInteraction: payload.data?.requireInteraction === 'true',
+    vibrate: payload.data?.vibrate ? JSON.parse(payload.data.vibrate) : [200, 100, 200],
+    actions: [
+      {
+        action: 'view',
+        title: 'View Event'
+      },
+      {
+        action: 'close',
+        title: 'Close'
+      }
+    ]
+  };
+
+  return self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+// Handle Web Push API notifications (your existing notifications)
+self.addEventListener('push', event => {
+  console.log('[SW] Push received (Web Push)');
+  
+  if (event.data) {
+    let data;
+    try {
+      data = event.data.json();
+    } catch {
+      data = {
+        title: 'BG Events',
+        body: event.data.text()
+      };
+    }
+
+    const options = {
+      body: data.body,
+      icon: data.icon || '/icon-192x192.png',
+      badge: data.badge || '/icon-192x192.png',
+      tag: data.tag || 'bg-events',
+      data: data.data || { url: '/' },
+      requireInteraction: data.requireInteraction || false,
+      vibrate: data.vibrate || [200, 100, 200]
+    };
+
+    event.waitUntil(
+      self.registration.showNotification(data.title, options)
+    );
+  }
+});
+
+// Handle notification clicks (both FCM and Web Push)
+self.addEventListener('notificationclick', event => {
+  console.log('[SW] Notification click:', event.action);
+  event.notification.close();
+
+  if (event.action === 'close') {
+    return;
+  }
+
+  const urlToOpen = event.notification.data?.url || event.notification.data?.click_action || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(clientList => {
+        // Try to focus existing window
+        for (const client of clientList) {
+          if (client.url.includes(self.location.origin) && 'focus' in client) {
+            client.focus();
+            // Navigate to specific URL if needed
+            if (urlToOpen !== '/' && client.navigate) {
+              client.navigate(urlToOpen);
+            }
+            return;
+          }
+        }
+        // Open new window if app not open
+        if (clients.openWindow) {
+          return clients.openWindow(urlToOpen);
+        }
+      })
+  );
+});
+
+// Background sync for checking notifications
 self.addEventListener('sync', event => {
-  console.log('[SW] Background sync event:', event.tag);
+  console.log('[SW] Background sync:', event.tag);
   
   if (event.tag === 'check-notifications') {
     event.waitUntil(
       self.clients.matchAll().then(clients => {
         if (clients.length > 0) {
           clients[0].postMessage({ type: 'CHECK_NOTIFICATIONS_REQUEST' });
-        } else {
-          // Fallback notification when no clients available
-          return self.registration.showNotification('BG Events', {
-            body: 'Check for new events and updates',
-            icon: '/icon-192x192.png',
-            tag: 'background-check',
-            data: { url: '/' }
-          });
         }
       })
     );
   }
 });
 
-// Push notifications
-self.addEventListener('push', event => {
-  console.log('[SW] Push received');
-  
-  let data = {
-    title: 'BG Events',
-    body: 'You have a new notification',
-    icon: '/icon-192x192.png',
-    badge: '/icon-192x192.png'
-  };
-
-  if (event.data) {
-    try {
-      Object.assign(data, event.data.json());
-    } catch {
-      data.body = event.data.text();
-    }
-  }
-
-  const options = {
-    body: data.body,
-    icon: data.icon,
-    badge: data.badge,
-    tag: 'bg-events',
-    data: { url: data.url || '/' },
-    requireInteraction: false,
-    silent: false,
-    vibrate: [200, 100, 200]
-  };
-
-  event.waitUntil(
-    self.registration.showNotification(data.title, options)
-  );
-});
-
-self.addEventListener('pushsubscriptionchange', event => {
-  console.log('[SW] Push subscription changed');
-  event.waitUntil(
-    self.registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)
-    })
-    .then(subscription => {
-      // Send new subscription to server
-      return fetch('/api/push/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(subscription)
-      });
-    })
-  );
-});
-
-// Helper function to convert VAPID key
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding)
-    .replace(/\-/g, '+')
-    .replace(/_/g, '/');
-
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
-
-// Notification click handler
-self.addEventListener('notificationclick', event => {
-  console.log('[SW] Notification click', event.action);
-  event.notification.close();
-
-  if (event.action === 'view' || !event.action) {
-    event.waitUntil(
-      self.clients.matchAll({ type: 'window' }).then(clients => {
-        // Try to focus existing window
-        for (const client of clients) {
-          if (client.url.includes(self.location.origin) && 'focus' in client) {
-            return client.focus();
-          }
-        }
-        // Open new window
-        return self.clients.openWindow('/');
-      })
-    );
-  }
-});
-
-// Handle chunk loading errors by clearing cache
+// Handle messages from the app
 self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'INIT_FCM') {
+    console.log('[SW] FCM initialized from app');
+  }
+  
   if (event.data && event.data.type === 'CLEAR_CHUNK_CACHE') {
     event.waitUntil(
       caches.open(CACHE_NAME).then(cache => {
@@ -268,67 +220,11 @@ self.addEventListener('message', event => {
         });
       }).then(() => {
         console.log('[SW] Chunk cache cleared');
-        // Notify client that cache is cleared
         event.ports[0].postMessage({ success: true });
       })
     );
   }
 });
 
-self.addEventListener('push', function(event) {
-  console.log('Push received:', event);
-
-  if (!event.data) {
-    return;
-  }
-
-  const data = event.data.json();
-  
-  const options = {
-    body: data.body,
-    icon: data.icon || '/icon-192x192.png',
-    badge: data.badge || '/badge-icon.png',
-    data: data.data,
-    actions: data.actions || [],
-    requireInteraction: true, // Keep notification visible
-    tag: 'calendar-events' // Prevent multiple notifications
-  };
-
-  event.waitUntil(
-    self.registration.showNotification(data.title, options)
-  );
-});
-
-// Handle notification clicks
-self.addEventListener('notificationclick', function(event) {
-  console.log('Notification clicked:', event);
-  
-  event.notification.close();
-
-  if (event.action === 'view') {
-    // Open the events page
-    event.waitUntil(
-      clients.openWindow(event.notification.data.url || '/events')
-    );
-  } else if (event.action === 'dismiss') {
-    // Just close the notification
-    return;
-  } else {
-    // Default action - open the app
-    event.waitUntil(
-      clients.openWindow('/')
-    );
-  }
-});
-
-// Handle background sync for offline capability
-self.addEventListener('sync', function(event) {
-  if (event.tag === 'background-sync') {
-    event.waitUntil(doBackgroundSync());
-  }
-});
-
-function doBackgroundSync() {
-  // Handle any background tasks
-  return fetch('/api/sync');
-}
+// Log for debugging
+console.log('[SW] Service worker loaded with FCM support');

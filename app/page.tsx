@@ -63,17 +63,20 @@ export default function Home() {
     }
   }
 
-  // Service Worker registration - ONLY ONCE
   useEffect(() => {
     if (!isClient || swRegistered.current) return
     
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/firebase-messaging-sw.js')
+      // Register the combined service worker
+      navigator.serviceWorker.register('/sw.js')
         .then(reg => {
-          console.log('✅ Firebase SW registered:', reg.scope)
+          console.log('✅ Combined SW registered:', reg.scope)
           swRegistered.current = true
+          
+          // Firebase will automatically use this registered service worker
+          // No need to register firebase-messaging-sw.js separately
         })
-        .catch(err => console.error('❌ Firebase SW registration failed:', err))
+        .catch(err => console.error('❌ SW registration failed:', err))
     }
   }, [isClient])
 
