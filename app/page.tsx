@@ -257,12 +257,12 @@ export default function Home() {
     
     const emergencyTimeout = setTimeout(() => {
       if (!authLoaded || (user && !eventsLoaded)) {
-        console.log('🚨 EMERGENCY: Forcing states to complete after 10 seconds')
+        console.log('🚨 EMERGENCY: Forcing states to complete after 5 seconds')
         setAuthLoaded(true)
         setEventsLoaded(true)
         setFcmInitialized(true)
       }
-    }, 10000)
+    }, 5000)
     
     return () => clearTimeout(emergencyTimeout)
   }, [mounted, authLoaded, eventsLoaded, user])
