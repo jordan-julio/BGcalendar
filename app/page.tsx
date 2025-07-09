@@ -1,4 +1,4 @@
-// app/page.tsx - Fixed hydration-safe version
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react'
@@ -15,6 +15,14 @@ import { Event } from '@/types'
 import { Calendar as CalendarIcon, Bell, TestTube, Settings, MoreVertical, X, Palette } from 'lucide-react'
 import ColorManagementModal from '@/components/ColorManagementModal';
 
+// Centralized loading state management
+interface LoadingState {
+  mounted: boolean
+  auth: boolean
+  events: boolean
+  fcm: boolean
+}
+
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,48 +30,43 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [showNotificationPrefs, setShowNotificationPrefs] = useState(false)
-  
-  // *** HYDRATION FIX: Separate client-side and SSR states ***
-  const [isClient, setIsClient] = useState(false)
-  const [mounted, setMounted] = useState(false)
-  
-  // Loading state trackers - only meaningful after mount
-  const [authLoaded, setAuthLoaded] = useState(false)
-  const [eventsLoaded, setEventsLoaded] = useState(false)
-  const [fcmInitialized, setFcmInitialized] = useState(false)
   const [showColorManagement, setShowColorManagement] = useState(false)
+  
+  // Centralized loading state
+  const [loadingState, setLoadingState] = useState<LoadingState>({
+    mounted: false,
+    auth: false,
+    events: false,
+    fcm: false
+  })
+  
   const { refreshColors, forceUpdate } = useColorManagement();
   
   // Refs to prevent multiple initializations
   const swRegistered = useRef(false)
   const previousUserId = useRef<string | null>(null)
+  const initializationStarted = useRef(false)
+  const retryCount = useRef(0)
+  const maxRetries = 3
+
+  // Helper function to update loading state
+  const updateLoadingState = useCallback((updates: Partial<LoadingState>) => {
+    setLoadingState(prev => ({ ...prev, ...updates }))
+  }, [])
+
+  // Check if we should show loading
+  const shouldShowLoading = loadingState.mounted && 
+    (!loadingState.auth || (user && !loadingState.events))
 
   // *** CRITICAL: Handle hydration properly ***
   useEffect(() => {
-    setMounted(true)
-    setIsClient(true)
-  }, [])
+    console.log('🚀 Component mounting...')
+    updateLoadingState({ mounted: true })
+  }, [updateLoadingState])
 
-  // *** HYDRATION SAFE: Only show loading after mount ***
-  const shouldShowLoading = mounted && (!authLoaded || (user && !eventsLoaded))
-
-  // *** Loading state management - only after mount ***
+  // Service Worker Registration (run once after mount)
   useEffect(() => {
-    if (!mounted) return
-    
-    console.log('🔍 Loading state check (client-side only):', {
-      mounted,
-      authLoaded,
-      eventsLoaded,
-      fcmInitialized,
-      user: !!user,
-      shouldShowLoading
-    })
-  }, [mounted, authLoaded, eventsLoaded, fcmInitialized, user, shouldShowLoading])
-
-  // Service Worker Registration (client-side only)
-  useEffect(() => {
-    if (!mounted || !isClient || swRegistered.current) return
+    if (!loadingState.mounted || swRegistered.current) return
     
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js')
@@ -73,15 +76,63 @@ export default function Home() {
         })
         .catch(err => console.error('❌ SW registration failed:', err))
     }
-  }, [mounted, isClient])
+  }, [loadingState.mounted])
+
+  // Robust auth initialization with retry logic
+  const initializeAuth = useCallback(async (): Promise<any> => {
+    console.log(`🔐 Attempting auth initialization (attempt ${retryCount.current + 1}/${maxRetries})...`)
+    
+    try {
+      // First, let's check if Supabase is properly configured
+      if (!supabase) {
+        throw new Error('Supabase client is not initialized')
+      }
+
+      // Try to get the session first (this is often more reliable)
+      console.log('🔍 Getting current session...')
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+      
+      if (sessionError) {
+        console.warn('⚠️ Session error (trying getUser):', sessionError.message)
+        // If session fails, try getUser as fallback
+        const { data: userData, error: userError } = await supabase.auth.getUser()
+        
+        if (userError) {
+          console.error('❌ Both session and user fetch failed:', userError.message)
+          throw userError
+        }
+        
+        console.log('✅ Auth via getUser successful')
+        return userData.user
+      }
+      
+      console.log('✅ Auth via getSession successful')
+      return sessionData.session?.user || null
+      
+    } catch (error: any) {
+      console.error(`❌ Auth initialization attempt ${retryCount.current + 1} failed:`, error)
+      
+      // If this wasn't the last retry, increment and try again
+      if (retryCount.current < maxRetries - 1) {
+        retryCount.current++
+        console.log(`🔄 Retrying auth initialization in 1 second...`)
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        return initializeAuth()
+      }
+      
+      // All retries exhausted
+      console.error('💥 All auth initialization attempts failed')
+      throw new Error(`Auth initialization failed after ${maxRetries} attempts: ${error.message}`)
+    }
+  }, [])
 
   // Fetch events function
   const fetchEvents = useCallback(async () => {
-    if (eventsLoaded) return
+    if (!user || loadingState.events) return
+    
+    console.log('📅 Fetching events for user:', user.id)
     
     try {
-      console.log('📅 Fetching events...')
-      
       const { data, error } = await supabase
         .from('events')
         .select('*')
@@ -95,136 +146,176 @@ export default function Home() {
       console.log(`✅ Successfully fetched ${data?.length || 0} events`)
       setEvents(data || [])
       setError(null)
-    } catch (err) {
+    } catch (err: any) {
       console.error('💥 Error in fetchEvents:', err)
-      setError('Failed to load events. Please refresh the page.')
+      setError(`Failed to load events: ${err.message}`)
     } finally {
-      setEventsLoaded(true)
+      updateLoadingState({ events: true })
     }
-  }, [eventsLoaded])
+  }, [user, loadingState.events, updateLoadingState])
 
-  // FCM Initialization (client-side only)
+  // FCM Initialization
   const initializeFCM = useCallback(async () => {
-    if (!user || fcmInitialized || !mounted) return
+    if (!user || loadingState.fcm || !loadingState.mounted) return
+    
+    console.log('🔔 Starting FCM initialization for user:', user.id)
     
     try {
-      console.log('🔔 Starting FCM initialization...')
-      
       const fcmService = FCMTokenService.getInstance()
       const success = await fcmService.initializeForUser(user.id)
-      
       console.log(success ? '✅ FCM initialized successfully' : '⚠️ FCM initialization failed')
     } catch (error) {
       console.error('❌ FCM initialization error:', error)
     } finally {
-      setFcmInitialized(true)
+      updateLoadingState({ fcm: true })
     }
-  }, [user, fcmInitialized, mounted])
+  }, [user, loadingState.fcm, loadingState.mounted, updateLoadingState])
 
-  // Auth and events initialization - ONLY after mount
+  // Main initialization effect - runs once after mount
   useEffect(() => {
-    if (!mounted || !isClient) return
+    if (!loadingState.mounted || initializationStarted.current) return
     
+    initializationStarted.current = true
     let isMounted = true
     
     const initializeApp = async () => {
       try {
-        console.log('🚀 Initializing app (client-side only)...')
+        console.log('🚀 Starting app initialization...')
         
-        const { data: { user } } = await supabase.auth.getUser()
-        setUser(user ?? null)
+        // Reset retry count for this initialization
+        retryCount.current = 0
+        
+        // Get current user with retry logic
+        const currentUser = await initializeAuth()
+        
         if (!isMounted) return
-        previousUserId.current = user?.id || null
         
-        // Auth is now loaded
-        setAuthLoaded(true)
+        console.log('🔐 Current user:', currentUser?.id || 'none')
+        setUser(currentUser)
+        previousUserId.current = currentUser?.id || null
         
-        // If we have a user, fetch events
-        if (user) {
-          await fetchEvents()
-        } else {
-          // No user, so we don't need to load events
-          setEventsLoaded(true)
+        // Mark auth as loaded
+        updateLoadingState({ auth: true })
+        
+        // If no user, mark everything as loaded
+        if (!currentUser) {
+          console.log('👤 No user found, skipping data loading')
+          updateLoadingState({ events: true, fcm: true })
+          return
         }
         
-      } catch (error) {
+        // User exists, continue with data loading
+        console.log('👤 User authenticated, ready for data loading...')
+        
+      } catch (error: any) {
         console.error('❌ App initialization error:', error)
-        setError('Failed to initialize app. Please refresh the page.')
-        // Even on error, mark as loaded so we can show the error
-        setAuthLoaded(true)
-        setEventsLoaded(true)
+        
+        // Set a more specific error message
+        const errorMessage = error.message.includes('fetch') 
+          ? 'Network connection failed. Please check your internet connection and try again.'
+          : error.message.includes('Invalid API key')
+          ? 'Authentication configuration error. Please contact support.'
+          : `Initialization failed: ${error.message}`
+        
+        setError(errorMessage)
+        
+        // Mark auth as loaded even on error so we don't get stuck in loading
+        updateLoadingState({ auth: true, events: true, fcm: true })
       }
     }
 
     initializeApp()
 
-    // Set up auth state listener
+    // Set up auth state listener with better error handling
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return
       
-      console.log('🔐 Auth state changed:', event)
-      const newUser = session?.user ?? null
-      const oldUserId = previousUserId.current
+      console.log('🔐 Auth state changed:', event, session?.user?.id || 'no user')
       
-      setUser(newUser)
-      
-      if (event === 'SIGNED_OUT') {
-        console.log('👋 User signed out, cleaning up...')
+      try {
+        const newUser = session?.user ?? null
+        const oldUserId = previousUserId.current
         
-        // Clean up FCM for the previous user
-        if (oldUserId) {
-          try {
-            const fcmService = FCMTokenService.getInstance()
-            await fcmService.cleanup(oldUserId)
-            console.log('✅ FCM cleanup completed')
-          } catch (error) {
-            console.error('❌ FCM cleanup error:', error)
+        setUser(newUser)
+        
+        if (event === 'SIGNED_OUT') {
+          console.log('👋 User signed out, resetting state...')
+          
+          // Clean up FCM for the previous user
+          if (oldUserId) {
+            try {
+              const fcmService = FCMTokenService.getInstance()
+              await fcmService.cleanup(oldUserId)
+              console.log('✅ FCM cleanup completed')
+            } catch (error) {
+              console.error('❌ FCM cleanup error:', error)
+            }
           }
+          
+          // Reset all state
+          setEvents([])
+          setError(null)
+          updateLoadingState({ events: true, fcm: true })
+          
+        } else if (event === 'SIGNED_IN' && newUser) {
+          console.log('👋 User signed in:', newUser.id)
+          
+          // Reset loading states for new user
+          updateLoadingState({ events: false, fcm: false })
+          setError(null)
         }
         
-        // Reset states for signed out user
-        setEvents([])
-        setEventsLoaded(true)
-        setFcmInitialized(true)
+        // Update previous user ID
+        previousUserId.current = newUser?.id || null
         
-      } else if (event === 'SIGNED_IN' && newUser) {
-        console.log('👋 User signed in:', newUser.id)
-        
-        // Reset loading states for new user
-        setEventsLoaded(false)
-        setFcmInitialized(false)
-        
-        // Fetch events for new user
-        await fetchEvents()
+      } catch (error: any) {
+        console.error('❌ Error in auth state change handler:', error)
+        setError(`Authentication error: ${error.message}`)
       }
-      
-      // Update previous user ID
-      previousUserId.current = newUser?.id || null
     })
 
     return () => {
+      console.log('🧹 Cleaning up main effect...')
       isMounted = false
       subscription.unsubscribe()
     }
-  }, [mounted, isClient, fetchEvents])
+  }, [loadingState.mounted, updateLoadingState, initializeAuth])
 
-  // FCM initialization (runs after user is set)
+  // Fetch events when user is available and auth is loaded
   useEffect(() => {
-    if (user && mounted && isClient && authLoaded && eventsLoaded) {
+    if (loadingState.auth && user && !loadingState.events) {
+      console.log('📅 Auth loaded and user available, fetching events...')
+      fetchEvents()
+    }
+  }, [loadingState.auth, user, loadingState.events, fetchEvents])
+
+  // Initialize FCM when everything else is ready
+  useEffect(() => {
+    if (loadingState.auth && loadingState.events && user && !loadingState.fcm) {
+      console.log('🔔 Dependencies ready, initializing FCM...')
       initializeFCM()
     }
-  }, [user, mounted, isClient, authLoaded, eventsLoaded, initializeFCM])
+  }, [loadingState.auth, loadingState.events, user, loadingState.fcm, initializeFCM])
 
-  // Realtime subscription (client-side only)
+  // Realtime subscription - only after everything is loaded
   useEffect(() => {
-    if (!user || !authLoaded || !eventsLoaded || !mounted) return
+    if (!user || !loadingState.auth || !loadingState.events) return
     
-    console.log('📡 Setting up realtime subscription...')
+    console.log('📡 Setting up realtime subscription for user:', user.id)
     
     const channel = supabase
       .channel('events-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, payload => {
-        console.log('📡 Realtime event:', payload.eventType)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'events'
+      }, payload => {
+        console.log(
+          '📡 Realtime event:',
+          payload.eventType,
+          (payload.new && 'id' in payload.new ? payload.new.id : undefined) ||
+            (payload.old && 'id' in payload.old ? payload.old.id : undefined)
+        )
         
         try {
           if (payload.eventType === 'INSERT') {
@@ -246,23 +337,55 @@ export default function Home() {
       console.log('📡 Cleaning up realtime subscription')
       channel.unsubscribe()
     }
-  }, [user, authLoaded, eventsLoaded, mounted])
+  }, [user, loadingState.auth, loadingState.events])
 
-  // Emergency timeout to prevent infinite loading
+  // Emergency timeout - more generous but with better messaging
   useEffect(() => {
-    if (!mounted) return
+    if (!loadingState.mounted) return
     
     const emergencyTimeout = setTimeout(() => {
-      if (!authLoaded || (user && !eventsLoaded)) {
-        console.log('🚨 EMERGENCY: Forcing states to complete after 10 seconds')
-        setAuthLoaded(true)
-        setEventsLoaded(true)
-        setFcmInitialized(true)
+      if (!loadingState.auth || (user && !loadingState.events)) {
+        console.log('🚨 EMERGENCY: Forcing incomplete states to complete after 8 seconds')
+        console.log('Current state:', loadingState)
+        
+        // Force all states to complete
+        updateLoadingState({ auth: true, events: true, fcm: true })
+        
+        if (!error) {
+          setError('Loading is taking longer than expected. The app may not function properly. Try refreshing the page.')
+        }
       }
-    }, 10000)
+    }, 8000) // Increased to 8 seconds to allow for retries
     
     return () => clearTimeout(emergencyTimeout)
-  }, [mounted, authLoaded, eventsLoaded, user])
+  }, [loadingState, user, error, updateLoadingState])
+
+  // Debug logging
+  useEffect(() => {
+    console.log('📊 State update:', {
+      mounted: loadingState.mounted,
+      auth: loadingState.auth,
+      events: loadingState.events,
+      fcm: loadingState.fcm,
+      user: !!user,
+      shouldShowLoading,
+      eventsCount: events.length,
+      error: !!error
+    })
+  }, [loadingState, user, shouldShowLoading, events.length, error])
+
+  // Manual retry function
+  const retryInitialization = useCallback(() => {
+    console.log('🔄 Manual retry requested...')
+    setError(null)
+    retryCount.current = 0
+    initializationStarted.current = false
+    updateLoadingState({ 
+      auth: false, 
+      events: false, 
+      fcm: false 
+    })
+  }, [updateLoadingState])
 
   // Debug functions
   const testFCMNotification = useCallback(async () => {
@@ -301,7 +424,7 @@ export default function Home() {
   }, [user])
 
   const checkFCMStatus = useCallback(() => {
-    if (!isClient) {
+    if (!loadingState.mounted) {
       alert('Client not ready yet')
       return
     }
@@ -319,13 +442,13 @@ FCM Ready: ${isReady}
 Service Worker: ${'serviceWorker' in navigator}
 Notifications API: ${'Notification' in window}
 Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
-  }, [isClient])
+  }, [loadingState.mounted])
 
   const reinitializeFCM = useCallback(async () => {
     if (!user) return
     
     try {
-      setFcmInitialized(false)
+      updateLoadingState({ fcm: false })
       const fcmService = FCMTokenService.getInstance()
       fcmService.destroy()
       
@@ -335,7 +458,7 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
       console.error('❌ Failed to reinitialize FCM:', error)
       alert('❌ FCM reinitialization failed. Check console for details.')
     }
-  }, [user, initializeFCM])
+  }, [user, initializeFCM, updateLoadingState])
 
   const resetApp = useCallback(() => {
     console.log('🔄 Resetting app...')
@@ -343,7 +466,7 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
   }, [])
 
   // *** HYDRATION SAFE: Don't render anything until mounted ***
-  if (!mounted) {
+  if (!loadingState.mounted) {
     return null // Return null during SSR to avoid hydration mismatch
   }
 
@@ -358,21 +481,30 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
           {/* Debug info in development */}
           {process.env.NODE_ENV === 'development' && (
             <div className="mt-4 text-xs text-gray-500 space-y-1">
-              <div>Auth: {authLoaded ? '✅' : '⏳'}</div>
-              <div>Events: {eventsLoaded ? '✅' : '⏳'}</div>
-              <div>FCM: {fcmInitialized ? '✅' : '⏳'}</div>
-              <div>User: {user ? 'loaded' : 'none'}</div>
+              <div>Mounted: {loadingState.mounted ? '✅' : '⏳'}</div>
+              <div>Auth: {loadingState.auth ? '✅' : '⏳'} (Retry: {retryCount.current + 1})</div>
+              <div>Events: {loadingState.events ? '✅' : '⏳'}</div>
+              <div>FCM: {loadingState.fcm ? '✅' : '⏳'}</div>
+              <div>User: {user ? `${user.id.substring(0, 8)}...` : 'none'}</div>
             </div>
           )}
           
-          {/* Emergency reset button */}
+          {/* Manual retry button */}
           {process.env.NODE_ENV === 'development' && (
-            <button
-              onClick={resetApp}
-              className="mt-4 text-xs bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200"
-            >
-              Force Reset (Dev)
-            </button>
+            <div className="mt-4 space-x-2">
+              <button
+                onClick={retryInitialization}
+                className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+              >
+                Retry Init
+              </button>
+              <button
+                onClick={resetApp}
+                className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200"
+              >
+                Force Reset
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -385,18 +517,26 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
         <div className="text-center p-6 bg-red-50 rounded-lg border border-red-200 max-w-md">
           <h3 className="text-lg font-semibold text-red-800 mb-2">Connection Error</h3>
           <p className="text-red-600 mb-4 text-sm">{error}</p>
-          <button
-            onClick={resetApp}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
-          >
-            Reset App
-          </button>
+          <div className="space-x-2">
+            <button
+              onClick={retryInitialization}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+            >
+              Retry
+            </button>
+            <button
+              onClick={resetApp}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
+            >
+              Reset App
+            </button>
+          </div>
         </div>
       </div>
     )
   }
 
-  // Main app content (same as before, but now hydration-safe)
+  // Main app content (rest of component unchanged)
   return (
     <div className="min-h-screen bg-gray-50">
       <PWAInstallPrompt />
@@ -416,13 +556,13 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
             </div>
 
             <div className="flex items-center space-x-2 sm:space-x-4 flex-shrink-0">
-              {user && isClient && (
+              {user && loadingState.mounted && (
                 <div className="flex-shrink-0">
                   <NotificationBell userId={user.id} />
                 </div>
               )}
               
-              {user && isClient && (
+              {user && loadingState.mounted && (
                 <div className="relative lg:hidden">
                   <button
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -473,7 +613,7 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
                 </div>
               )}
               
-              {user && isClient && (
+              {user && loadingState.mounted && (
                 <div className="hidden lg:flex items-center space-x-2">
                   <button
                     onClick={testFCMNotification}
@@ -569,7 +709,7 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
             />
             <Card
               label="FCM Status"
-              value={user && isClient ? (
+              value={user && loadingState.mounted ? (
                 FCMTokenService.getInstance().isReady() ? 'Ready' : 'Setup Needed'
               ) : 'Sign in'}
               icon={<Bell className="h-6 w-6 sm:h-8 sm:w-8 text-purple-500 opacity-20" />}
@@ -579,6 +719,7 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
           <Calendar events={events} user={user} key={forceUpdate} />
         </div>
       </main>
+      
       {showColorManagement && (
         <ColorManagementModal
           events={events}
@@ -594,7 +735,7 @@ Current Token: ${fcmService.getCurrentToken()?.substring(0, 20) || 'None'}...`)
   )
 }
 
-// Card component
+// Card component (unchanged)
 function Card({ label, value, icon }: { label: string; value: number | string; icon: React.ReactNode }) {
   return (
     <div className="bg-white rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-sm border border-gray-200">
