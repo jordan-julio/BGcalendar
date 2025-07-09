@@ -143,8 +143,6 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
   const handleColorChange = (eventId: string, color: { bg: string; text: string; name?: string }) => {
     setCustomEventColor(eventId, color)
     setShowColorPicker(null)
-    // Force re-render by updating a dummy state or use a callback to parent
-    window.location.reload() // Quick fix - in production, use proper state management
   }
 
   // Calculate container height dynamically
@@ -277,17 +275,19 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
         <>
           {/* Backdrop */}
           <div 
-            className="fixed inset-0 z-50" 
+            className="fixed inset-0 bg-black bg-opacity-30" 
+            style={{ zIndex: 9998 }}
             onClick={() => setShowColorPicker(null)}
           />
           
           {/* Color picker */}
           <div
-            className="fixed bg-white rounded-lg shadow-lg border border-gray-200 p-3 z-50"
+            className="fixed bg-white rounded-lg shadow-xl border border-gray-200 p-3 pointer-events-auto"
             style={{
               left: showColorPicker.position.x,
               top: showColorPicker.position.y,
-              maxWidth: '200px'
+              maxWidth: '200px',
+              zIndex: 9999 // Highest possible z-index
             }}
           >
             <h4 className="text-sm font-medium text-gray-900 mb-2">Choose Color</h4>
