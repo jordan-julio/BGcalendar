@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // components/NotificationBell.tsx - Fixed version that never gets cut off
 'use client'
 
@@ -138,7 +139,7 @@ export default function NotificationBell({ userId }: { userId: string }) {
 
       if (data) {
         // Filter out events that have already passed (including time consideration)
-        const relevantEvents = data.filter(event => {
+        const relevantEvents = data.filter((event: { start_date: string | number | Date; time: { split: (arg0: string) => { (): any; new(): any; map: { (arg0: NumberConstructor): [any, any]; new(): any } } } }) => {
           const eventDate = new Date(event.start_date)
           
           // If event has a time, use it for more precise filtering

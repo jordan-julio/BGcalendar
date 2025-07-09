@@ -131,19 +131,16 @@ export default function Home() {
       try {
         console.log('🚀 Initializing app (client-side only)...')
         
-        // Get initial session
-        const { data: { session } } = await supabase.auth.getSession()
+        const { data: { user } } = await supabase.auth.getUser()
+        setUser(user ?? null)
         if (!isMounted) return
-        
-        const currentUser = session?.user ?? null
-        setUser(currentUser)
-        previousUserId.current = currentUser?.id || null
+        previousUserId.current = user?.id || null
         
         // Auth is now loaded
         setAuthLoaded(true)
         
         // If we have a user, fetch events
-        if (currentUser) {
+        if (user) {
           await fetchEvents()
         } else {
           // No user, so we don't need to load events
@@ -257,12 +254,12 @@ export default function Home() {
     
     const emergencyTimeout = setTimeout(() => {
       if (!authLoaded || (user && !eventsLoaded)) {
-        console.log('🚨 EMERGENCY: Forcing states to complete after 5 seconds')
+        console.log('🚨 EMERGENCY: Forcing states to complete after 10 seconds')
         setAuthLoaded(true)
         setEventsLoaded(true)
         setFcmInitialized(true)
       }
-    }, 5000)
+    }, 10000)
     
     return () => clearTimeout(emergencyTimeout)
   }, [mounted, authLoaded, eventsLoaded, user])

@@ -16,8 +16,8 @@ export default function FCMDiagnosticPage() {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession()
-        setUser(session?.user ?? null)
+        const { data: { user } } = await supabase.auth.getUser()
+        setUser(user ?? null)
       } catch (error) {
         console.error('Error getting session:', error)
       } finally {

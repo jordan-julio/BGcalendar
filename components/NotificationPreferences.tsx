@@ -20,35 +20,34 @@ export default function NotificationPreferences({ userId }: { userId: string }) 
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    const loadPreferences = async () => {
+        try {
+        const { data, error } = await supabase
+            .from('notification_preferences')
+            .select('*')
+            .eq('user_id', userId)
+            .single();
+
+        if (error && error.code !== 'PGRST116') { // Not found error
+            console.error('Error loading preferences:', error);
+            return;
+        }
+
+        if (data) {
+            setPreferences({
+            daily_reminders: data.daily_reminders,
+            reminder_time: data.reminder_time,
+            timezone: data.timezone
+            });
+        }
+        } catch (error) {
+        console.error('Error loading preferences:', error);
+        } finally {
+        setLoading(false);
+        }
+    };
     loadPreferences();
   }, [userId]);
-
-  const loadPreferences = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('notification_preferences')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
-
-      if (error && error.code !== 'PGRST116') { // Not found error
-        console.error('Error loading preferences:', error);
-        return;
-      }
-
-      if (data) {
-        setPreferences({
-          daily_reminders: data.daily_reminders,
-          reminder_time: data.reminder_time,
-          timezone: data.timezone
-        });
-      }
-    } catch (error) {
-      console.error('Error loading preferences:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const savePreferences = async () => {
     setSaving(true);
