@@ -287,7 +287,7 @@ const [showColorPicker, setShowColorPicker] = useState<{ eventId: string; positi
                   })
                   setHoveredEvent(null) // Hide tooltip when color picker opens
                 }}
-                className="opacity-0 md:group-hover:opacity-100 md:opacity-0 sm:opacity-100 transition-opacity ml-1 p-1 hover:bg-black hover:bg-opacity-20 rounded touch-manipulation"
+                className="opacity-1 rounded touch-manipulation"
                 title="Change color"
               >
                 <Palette className="h-3 w-3" />
