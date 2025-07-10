@@ -1,11 +1,11 @@
-// components/WeekEventBar.tsx - Enhanced with smart color assignment
+// components/WeekEventBar.tsx - Enhanced with smart color assignment and responsive design
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { isSameDay, startOfDay, endOfDay, isWithinInterval } from 'date-fns'
 import { Event } from '@/types'
 import { getEventColorSmart, getOverlappingEvents, setCustomEventColor, getAllAvailableColors } from '@/lib/utils'
-import { ChevronDown, ChevronUp, Palette } from 'lucide-react'
+import { ChevronDown, ChevronUp, Palette, X } from 'lucide-react'
 
 interface WeekEventBarProps {
   events: Event[]
@@ -17,10 +17,50 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set())
   const [hoveredEvent, setHoveredEvent] = useState<{ event: Event; position: { x: number; y: number } } | null>(null)
   const [showColorPicker, setShowColorPicker] = useState<{ eventId: string; position: { x: number; y: number } } | null>(null)
+  const colorPickerRef = useRef<HTMLDivElement>(null)
   
   // Create unique week identifier
   const weekId = weekDays[0]?.toISOString().slice(0, 10) || 'week'
   const isExpanded = expandedWeeks.has(weekId)
+
+  // Auto-close color picker on outside click, escape key, or timeout
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (colorPickerRef.current && !colorPickerRef.current.contains(event.target as Node)) {
+        setShowColorPicker(null)
+      }
+    }
+
+    const handleEscapeKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowColorPicker(null)
+      }
+    }
+
+    const handleResize = () => {
+      if (showColorPicker) {
+        setShowColorPicker(null)
+      }
+    }
+
+    if (showColorPicker) {
+      document.addEventListener('mousedown', handleClickOutside)
+      document.addEventListener('keydown', handleEscapeKey)
+      window.addEventListener('resize', handleResize)
+      
+      // Auto-close after 15 seconds for mobile users
+      const autoCloseTimer = setTimeout(() => {
+        setShowColorPicker(null)
+      }, 15000)
+
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside)
+        document.removeEventListener('keydown', handleEscapeKey)
+        window.removeEventListener('resize', handleResize)
+        clearTimeout(autoCloseTimer)
+      }
+    }
+  }, [showColorPicker])
 
   // Get all events that span through this week
   const weekEvents = events.filter(event => {
@@ -139,6 +179,23 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
     setExpandedWeeks(newExpanded)
   }
 
+  // Smart positioning for color picker - centered in screen
+  const calculateColorPickerPosition = () => {
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const isMobile = viewportWidth < 768
+    
+    // Different dimensions for mobile vs desktop
+    const pickerWidth = isMobile ? Math.min(320, viewportWidth - 32) : 280
+    const pickerHeight = isMobile ? 360 : 320
+    
+    // Center the popup in the middle of the screen
+    const x = (viewportWidth - pickerWidth) / 2
+    const y = (viewportHeight - pickerHeight) / 2
+
+    return { x, y, width: pickerWidth, height: pickerHeight }
+  }
+
   // Handle color picker
   const handleColorChange = (eventId: string, color: { bg: string; text: string; name?: string }) => {
     setCustomEventColor(eventId, color)
@@ -160,7 +217,7 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
       style={{ 
         top: '32px',
         height: `${containerHeight}px`,
-        zIndex: 10 
+        zIndex: showColorPicker ? 9995 : 10 // Lower z-index when color picker is open
       }}
     >
       {/* Event bars - Only render visible events */}
@@ -177,7 +234,7 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
         return (
           <div
             key={`${event.id}-${row}`}
-            className="absolute cursor-pointer transition-all hover:brightness-110 hover:shadow-sm rounded-md group"
+            className="absolute cursor-pointer transition-all hover:brightness-110 hover:shadow-sm rounded-md group event-bar"
             style={{
               backgroundColor: color.bg,
               color: color.text,
@@ -199,13 +256,19 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
               onEventClick(event)
             }}
             onMouseEnter={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect()
-              setHoveredEvent({
-                event,
-                position: { x: rect.left, y: rect.bottom + 5 }
-              })
+              if (!showColorPicker) {
+                const rect = e.currentTarget.getBoundingClientRect()
+                setHoveredEvent({
+                  event,
+                  position: { x: rect.left, y: rect.bottom + 5 }
+                })
+              }
             }}
-            onMouseLeave={() => setHoveredEvent(null)}
+            onMouseLeave={() => {
+              if (!showColorPicker) {
+                setHoveredEvent(null)
+              }
+            }}
             title={`${event.title}${event.time ? ` at ${event.time}` : ''}`}
           >
             <div className="truncate w-full flex items-center justify-between">
@@ -215,13 +278,14 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  const rect = e.currentTarget.getBoundingClientRect()
+                  const position = calculateColorPickerPosition()
                   setShowColorPicker({
                     eventId: event.id,
-                    position: { x: rect.left, y: rect.bottom + 5 }
+                    position
                   })
+                  setHoveredEvent(null) // Hide tooltip when color picker opens
                 }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 p-1 hover:bg-black hover:bg-opacity-20 rounded"
+                className="opacity-0 md:group-hover:opacity-100 md:opacity-0 sm:opacity-100 transition-opacity ml-1 p-1 hover:bg-black hover:bg-opacity-20 rounded touch-manipulation"
                 title="Change color"
               >
                 <Palette className="h-3 w-3" />
@@ -236,7 +300,8 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
         <div 
           className="absolute left-0 right-0 pointer-events-auto"
           style={{ 
-            top: `${(actualVisibleRows * TOTAL_ROW_HEIGHT)}px`
+            top: `${(actualVisibleRows * TOTAL_ROW_HEIGHT)}px`,
+            zIndex: 15
           }}
         >
           <div className="flex items-center justify-between bg-gray-50 rounded-md border border-gray-200 px-2 py-1 mx-1 shadow-sm">
@@ -252,7 +317,7 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
                 e.stopPropagation()
                 toggleExpanded()
               }}
-              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors touch-manipulation"
             >
               {isExpanded ? (
                 <>
@@ -273,55 +338,78 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
       {/* Color Picker Popup */}
       {showColorPicker && (
         <>
-          {/* Backdrop */}
+          {/* Backdrop with higher z-index */}
           <div 
-            className="fixed inset-0 bg-black bg-opacity-30" 
-            style={{ zIndex: 9998 }}
+            className="fixed inset-0 bg-black/40 md:bg-black/20 touch-manipulation"
+            style={{ zIndex: 9997 }}
             onClick={() => setShowColorPicker(null)}
           />
           
-          {/* Color picker */}
+          {/* Color picker with highest z-index */}
           <div
-            className="fixed bg-white rounded-lg shadow-xl border border-gray-200 p-3 pointer-events-auto"
+            ref={colorPickerRef}
+            className="fixed bg-white rounded-lg shadow-2xl border border-gray-200 pointer-events-auto animate-in fade-in-0 zoom-in-95 duration-200 touch-manipulation"
             style={{
               left: showColorPicker.position.x,
               top: showColorPicker.position.y,
-              maxWidth: '200px',
-              zIndex: 9999 // Highest possible z-index
+              width: `${showColorPicker.position.width}px`,
+              maxHeight: `fit`,
+              zIndex: 9999 // Highest z-index
             }}
           >
-            <h4 className="text-sm font-medium text-gray-900 mb-2">Choose Color</h4>
+            {/* Header with close button */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-100">
+              <h4 className="text-lg font-semibold text-gray-900">Choose Color</h4>
+              <button
+                onClick={() => setShowColorPicker(null)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors touch-manipulation"
+                aria-label="Close color picker"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
             
-            {/* Standard colors */}
-            <div className="mb-3">
-              <p className="text-xs text-gray-500 mb-1">Standard</p>
-              <div className="grid grid-cols-5 gap-1">
-                {availableColors.standard.map((color, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleColorChange(showColorPicker.eventId, color)}
-                    className="w-6 h-6 rounded border border-gray-300 hover:scale-110 transition-transform"
-                    style={{ backgroundColor: color.bg }}
-                    title={color.name}
-                  />
-                ))}
+            <div className="p-4 space-y-5 flex-1 overflow-y-auto">
+              {/* Standard colors */}
+              <div>
+                <p className="text-sm text-gray-600 mb-3 font-medium">Standard Colors</p>
+                <div className="grid grid-cols-6 gap-3">
+                  {availableColors.standard.map((color, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleColorChange(showColorPicker.eventId, color)}
+                      className="w-10 h-10 rounded-lg border-2 border-gray-300 hover:border-gray-400 hover:scale-105 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 touch-manipulation shadow-sm"
+                      style={{ backgroundColor: color.bg }}
+                      title={color.name}
+                      aria-label={`Select ${color.name} color`}
+                    />
+                  ))}
+                </div>
+              </div>
+              
+              {/* Pastel colors */}
+              <div>
+                <p className="text-sm text-gray-600 mb-3 font-medium">Pastel Colors</p>
+                <div className="grid grid-cols-5 gap-3">
+                  {availableColors.pastel.map((color, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleColorChange(showColorPicker.eventId, color)}
+                      className="w-10 h-10 rounded-lg border-2 border-gray-300 hover:border-gray-400 hover:scale-105 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 touch-manipulation shadow-sm"
+                      style={{ backgroundColor: color.bg }}
+                      title={color.name}
+                      aria-label={`Select ${color.name} color`}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
             
-            {/* Pastel colors */}
-            <div>
-              <p className="text-xs text-gray-500 mb-1">Pastel</p>
-              <div className="grid grid-cols-4 gap-1">
-                {availableColors.pastel.map((color, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleColorChange(showColorPicker.eventId, color)}
-                    className="w-6 h-6 rounded border border-gray-300 hover:scale-110 transition-transform"
-                    style={{ backgroundColor: color.bg, color: color.text }}
-                    title={color.name}
-                  />
-                ))}
-              </div>
+            {/* Footer hint for mobile */}
+            <div className="md:hidden px-4 pb-4 border-t border-gray-100 bg-gray-50 rounded-b-xl">
+              <p className="text-sm text-gray-600 text-center pt-3">
+                Tap outside to close • Auto-closes in 15s
+              </p>
             </div>
           </div>
         </>
@@ -334,18 +422,20 @@ export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEve
         </div>
       )}
 
-      {/* Tooltip */}
+      {/* Tooltip - only show when color picker is not open */}
       {hoveredEvent && !showColorPicker && (
         <div
-          className="fixed bg-gray-800 text-white text-xs rounded px-2 py-1 shadow-lg pointer-events-none whitespace-nowrap z-50"
+          className="fixed bg-gray-800 text-white text-xs rounded px-2 py-1 shadow-lg pointer-events-none whitespace-nowrap max-w-xs z-50"
           style={{
-            left: hoveredEvent.position.x,
+            left: Math.min(hoveredEvent.position.x, window.innerWidth - 200),
             top: hoveredEvent.position.y
           }}
         >
-          {hoveredEvent.event.title}
-          {hoveredEvent.event.time && ` • ${hoveredEvent.event.time}`}
-          {hoveredEvent.event.description && ` • ${hoveredEvent.event.description}`}
+          <div className="truncate">
+            {hoveredEvent.event.title}
+            {hoveredEvent.event.time && ` • ${hoveredEvent.event.time}`}
+            {hoveredEvent.event.description && ` • ${hoveredEvent.event.description}`}
+          </div>
         </div>
       )}
     </div>
