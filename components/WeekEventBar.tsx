@@ -16,7 +16,9 @@ interface WeekEventBarProps {
 export default function WeekEventBar({ events, weekDays, onEventClick }: WeekEventBarProps) {
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set())
   const [hoveredEvent, setHoveredEvent] = useState<{ event: Event; position: { x: number; y: number } } | null>(null)
-  const [showColorPicker, setShowColorPicker] = useState<{ eventId: string; position: { x: number; y: number } } | null>(null)
+const [showColorPicker, setShowColorPicker] = useState<{ eventId: string; position: {
+  width: number; x: number; y: number; 
+} } | null>(null)
   const colorPickerRef = useRef<HTMLDivElement>(null)
   
   // Create unique week identifier
